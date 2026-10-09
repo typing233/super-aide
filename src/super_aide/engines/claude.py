@@ -15,6 +15,7 @@ from collections.abc import Callable
 import asyncio
 import json
 import logging
+import os
 import warnings
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -43,6 +44,9 @@ log = logging.getLogger(__name__)
 
 # 只读工具放进 allowed_tools 后不再经过 can_use_tool，这正是想要的：它们直接放行，回调只管命令行
 warnings.filterwarnings("ignore", message="can_use_tool will not be invoked")
+# 用的是 SDK 自带的 CLI，版本一定对得上。SDK 每次连接前都会多起一个 `claude -v` 查版本（约 0.4 秒），
+# 等它退出时还不设超时（2026-10-09 就卡死在这里，见 app._watch_child_exits）
+os.environ.setdefault("CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK", "1")
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "WebSearch", "WebFetch", "TodoWrite", "ToolSearch"]
 ASK_DISALLOWED = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Task", "Agent", "AskUserQuestion"]

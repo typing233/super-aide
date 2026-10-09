@@ -44,6 +44,7 @@ EN = {
     "上一轮没办成，这次加强：{model} · {effort}": "Last try didn't work, stepping up to {model} · {effort}",
     "{error} 换一个引擎接着做…": "Switching to another engine… ({error})",
     "这个对话已经结束，请重新提问。": "This conversation has ended. Please ask again.",
+    "引擎没给出结果就断开了": "The engine disconnected without a result",
     "没有可用的模型": "No model is available",
     "{engine}：{error}": "{engine}: {error}",  # 设置里刷新模型列表时的报错
 

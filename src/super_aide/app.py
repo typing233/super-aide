@@ -76,6 +76,31 @@ def _hide_child_consoles() -> None:
     subprocess.Popen.__init__ = init
 
 
+def _watch_child_exits() -> None:
+    """asyncio 在 Windows 上靠系统线程池的等待回调（WT_EXECUTEINWAITTHREAD）得知子进程退出。
+    实测（2026-10-09）进程里 UI Automation 的一个内部工作项卡在跨进程 COM 调用上以后，这类回调再也不来了
+    （不带这个标志的照常）：子进程退出一个也收不到，Claude SDK 等 `claude -v` 退出时就一直等下去，
+    任务停在"正在理解任务…"。改成每个子进程一个守护线程，直接等它的进程句柄。"""
+    import _winapi
+    from asyncio import windows_events, windows_utils
+
+    def start(self, args, shell, stdin, stdout, stderr, bufsize, **kwargs):
+        self._proc = proc = windows_utils.Popen(args, shell=shell, stdin=stdin, stdout=stdout, stderr=stderr,
+                                                bufsize=bufsize, **kwargs)
+        loop = self._loop
+
+        def wait() -> None:
+            _winapi.WaitForSingleObject(int(proc._handle), _winapi.INFINITE)
+            try:
+                loop.call_soon_threadsafe(lambda: self._process_exited(proc.poll()))
+            except RuntimeError:  # 事件循环已经关了
+                pass
+
+        threading.Thread(target=wait, name="child-exit", daemon=True).start()
+
+    windows_events._WindowsSubprocessTransport._start = start
+
+
 SYNCED = ".synced.json"
 #: 你点了"生效"或"撤销"后，生效的小程序重启我们时带的参数：--evolved <编号> 等
 EVOLVE_FLAGS = ("--evolved", "--evolve-failed", "--evolve-undone")
@@ -478,6 +503,7 @@ def main() -> int:
     paths.ensure()
     _setup_logging()
     _hide_child_consoles()
+    _watch_child_exits()
     wait_for_apply()  # 你点了"生效"、正在换包：等它换完再启动（它自己重启我们时不用等）
     if not _single_instance():
         log.info("已经在运行了")

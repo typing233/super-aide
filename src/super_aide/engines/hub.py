@@ -56,6 +56,9 @@ MAX_REACTIVE = 2  # 一轮里做到一半最多再想起几次（每次最多 3 
 REASK_S = 600     # 这么久之内又问了几乎一样的问题（同一个程序、同样的内容）：上一次多半没答好
 DUEL_DELAY = 15   # 答完过一会儿再在后台对比，不跟你接着问抢
 EVOLVE_DELAY = 600  # 对话结束（这么久没再接着问；Ctrl+Enter 能在 10 分钟内接着问）后再交给自我改进，证据才完整
+OPEN_TIMEOUT = 90   # 打开一个引擎会话最多等这么久（秒）：Claude 冷启动约 3 秒，它自己的初始化最多等 60 秒
+STOP_GRACE = 10     # 按 Esc 后给引擎自己停下的时间（秒），过了还在跑就直接结束这一轮
+STOPPED = {"ok": False, "stopped": True, "reason": "interrupted"}
 
 
 SLOW_STEP = 20  # 一步用了这么久（秒）就在记录里写上，看得出卡在哪儿
@@ -86,7 +89,9 @@ class Conversation:
     ctx: Context | None = None       # 最近一次的环境
     delegate: object | None = None  # 转交用的 Codex 会话
     delegated: bool = False          # 这一轮里发生过转交
-    busy: bool = False
+    busy: bool = False      # 在处理一问：从提交起（整理快照、打开引擎也算），到这一轮结束
+    sending: bool = False   # 引擎正在回答（这时按 Esc 先请它自己停下）
+    job: asyncio.Task | None = None  # 处理这一问的任务：还在准备、或者引擎停不下来时，按 Esc 直接取消它
     turns: list[dict] = field(default_factory=list)
     home: Path | None = None  # 首问的会话文件夹，问答记录（历史）存在这里
     question: str = ""        # 正在回答的这一问
@@ -161,7 +166,7 @@ class EngineHub(QObject):
         self._submit(self._discover_models())
 
     def ask(self, key: str, mode: str, question: str, snap: Snapshot, task: Task) -> None:
-        conv = Conversation(key=key, mode=mode, task=task)
+        conv = Conversation(key=key, mode=mode, task=task, busy=True)
         self.conversations[key] = conv
         self._submit(self._first_turn(conv, question, snap))
 
@@ -170,6 +175,7 @@ class EngineHub(QObject):
         if conv is None or conv.session is None:
             self._emit(key, Event("error", tr("这个对话已经结束，请重新提问。")))
             return
+        conv.busy, conv.stopped = True, False
         self._submit(self._followup(conv, question, snap))
 
     def feedback(self, key: str, good: bool, source: str = "feedback") -> None:
@@ -192,9 +198,7 @@ class EngineHub(QObject):
         if conv is None or not conv.busy:
             return
         conv.stopped = True  # 引擎被打断后可能仍报"正常结束"：这一轮按你停下的算，不当成没办成
-        for session in (conv.session, conv.delegate):
-            if session is not None:
-                self._submit(session.interrupt())
+        self._submit(self._stop(conv))
 
     def is_busy(self, key: str) -> bool:
         conv = self.conversations.get(key)
@@ -276,8 +280,10 @@ class EngineHub(QObject):
         self.models_found.emit({"found": found, "errors": errors})
 
     async def _first_turn(self, conv: Conversation, question: str, snap: Snapshot) -> None:
+        conv.job = asyncio.current_task()
         conv.home, conv.question = snap.dir, question
         loop = asyncio.get_running_loop()
+        answering = False
         try:
             conv.ctx = await loop.run_in_executor(None, snap.finalize)
             conv.task.url = snap.url
@@ -290,12 +296,19 @@ class EngineHub(QObject):
             await self._open(conv)
             message = prompts.first_message(question, conv.ctx, conv.mode, self._notes(conv), lessons)
             conv.first = (question, message, list(conv.ctx.images))
+            answering = True
             await self._turn(conv, message, conv.ctx.images)
+        except asyncio.CancelledError:
+            if not answering:  # 还在准备（整理快照、打开引擎）时按了 Esc。回答中途停下的结束由 _turn 报
+                self._drop_sessions(conv)  # 问题还没交给引擎：这个对话不再接着问
+                self._emit(conv.key, Event("done", data=dict(STOPPED)))
         except Exception as e:  # noqa: BLE001
             log.exception("首问失败")
             self._emit(conv.key, Event("error", friendly_error(e)))
             self._emit(conv.key, Event("done", data=_crash(e)))
             self._crashed(conv, e)
+        finally:
+            conv.busy, conv.job = False, None
 
     async def _open(self, conv: Conversation) -> None:
         while True:
@@ -305,7 +318,9 @@ class EngineHub(QObject):
                 "engine": decision.engine, "model": decision.model, "effort": decision.effort,
                 "via": decision.via, "explore": decision.explore, "reason": decision.reason}))
             try:
-                conv.session = await self.engines[decision.engine].open(conv.mode, decision.model, decision.effort)
+                # 有时间上限：打开卡住时（2026-10-09 实测卡死过）换另一个引擎，不能让你一直等
+                conv.session = await asyncio.wait_for(
+                    self.engines[decision.engine].open(conv.mode, decision.model, decision.effort), OPEN_TIMEOUT)
                 slot = getattr(conv.session, "slot", None)  # Claude 的会话：转交、想起经验的入口在这里接上这个对话
                 if slot is not None:
                     slot.remember = lambda text, c=conv: self._recall_more(c, text)
@@ -314,26 +329,34 @@ class EngineHub(QObject):
                         slot.fn = lambda task, c=conv: self._delegate(c, task)
                 return
             except Exception as e:  # noqa: BLE001
-                log.warning("%s 打不开：%s", decision.engine, e)
+                log.warning("%s 打不开：%s", decision.engine, str(e) or type(e).__name__)
                 self.router.mark_unavailable(decision.engine)
                 if not self.router.available():
                     raise
                 self._emit(conv.key, Event("status", tr("{error} 换一个引擎接着做…", error=friendly_error(e))))
 
     async def _followup(self, conv: Conversation, question: str, snap: Snapshot) -> None:
+        conv.job = asyncio.current_task()
         conv.question = question
+        answering = False
         try:
             conv.ctx = await asyncio.get_running_loop().run_in_executor(None, snap.finalize)
             lessons = await asyncio.get_running_loop().run_in_executor(None, self._recall, conv,
                                                                        snap.situation(question))
             await self._escalate(conv)
+            answering = True
             await self._turn(conv, prompts.followup_message(question, conv.ctx, conv.mode, self._notes(conv), lessons),
                              conv.ctx.images)
+        except asyncio.CancelledError:
+            if not answering:  # 还在准备时按了 Esc：会话没动过，还能接着问
+                self._emit(conv.key, Event("done", data=dict(STOPPED)))
         except Exception as e:  # noqa: BLE001
             log.exception("追问失败")
             self._emit(conv.key, Event("error", friendly_error(e)))
             self._emit(conv.key, Event("done", data=_crash(e)))
             self._crashed(conv, e)
+        finally:
+            conv.busy, conv.job = False, None
 
     def _browser_status(self, conv: Conversation) -> browser_use.Status | None:
         """用 Codex 官方的浏览器操作、操作模式、前台是浏览器、而它没接通时，返回原因和修法。
@@ -356,12 +379,13 @@ class EngineHub(QObject):
                 "但它可能因为确定不了当前网址而停下。办不成就在汇报第一行写「没完成：浏览器操作还没接通」。"]
 
     async def _turn(self, conv: Conversation, text: str, images: list) -> None:
-        conv.busy, conv.delegated, conv.stopped = True, False, False
+        conv.busy, conv.sending, conv.delegated = True, True, False
         if conv.learn_timer is not None:
             conv.learn_timer.cancel()  # 还在接着问：等这次对话结束了再总结
         conv.reactive = 0
         answer, trace, started = "", [], time.monotonic()
         step_started = started
+        finished = False
         try:
             async for ev in conv.session.send(text, images):
                 if ev.type in ("status", "done") and trace:
@@ -374,6 +398,7 @@ class EngineHub(QObject):
                     trace.append(ev.text)  # 助手做了哪些步骤：总结经验时用来看它绕没绕路
                     step_started = time.monotonic()
                 elif ev.type == "done":
+                    finished = True
                     ev.data.setdefault("model", conv.decision.model if conv.decision else "")
                     ev.data["delegated"] = conv.delegated
                     ev.data.update(seconds=round(time.monotonic() - started), tools=len(trace))
@@ -389,6 +414,17 @@ class EngineHub(QObject):
                     self._lessons_used(conv, ev.data)
                     self._save_history(conv, ev.data, answer, trace)
                 self._emit(conv.key, ev)
+            if not finished:  # 比如 CLI 中途退出、退出码却是 0：输出就这么断了。界面不能一直等着
+                raise ConnectionError(tr("引擎没给出结果就断开了"))
+        except asyncio.CancelledError:
+            if not finished:  # 按了 Esc，引擎过了 STOP_GRACE 秒还在跑：直接结束这一轮
+                done = dict(STOPPED, seconds=round(time.monotonic() - started), tools=len(trace))
+                conv.turns.append(done)
+                self._lessons_used(conv, done)
+                self._save_history(conv, done, answer, trace)
+                self._emit(conv.key, Event("done", data=done))
+                self._drop_sessions(conv)  # 引擎可能还停在半路：不再用这个会话，接着问会说对话已经结束
+            raise
         except Exception as e:  # noqa: BLE001
             log.exception("引擎出错")
             self._emit(conv.key, Event("error", friendly_error(e)))
@@ -396,9 +432,38 @@ class EngineHub(QObject):
             if not conv.stopped:
                 self._crashed(conv, e)
         finally:
-            conv.busy = False
+            conv.busy = conv.sending = False
             self._schedule_learning(conv)
             self._schedule_evolve(conv)
+
+    async def _stop(self, conv: Conversation) -> None:
+        """按了 Esc。引擎正在回答：先请它自己停下（会话还能接着问），过了 STOP_GRACE 秒还在跑就直接结束这一轮；
+        还在准备（整理快照、打开引擎）：直接结束。"""
+        job = conv.job
+        if job is None or job.done():
+            return
+        if conv.sending:
+            for session in (conv.session, conv.delegate):
+                if session is not None:
+                    self.loop.create_task(self._ask_to_stop(session))
+            await asyncio.wait({job}, timeout=STOP_GRACE)
+            if job.done():
+                return
+            log.warning("按了 Esc，引擎 %d 秒还没停下：直接结束这一轮", STOP_GRACE)
+        job.cancel()
+
+    @staticmethod
+    async def _ask_to_stop(session) -> None:
+        try:
+            await session.interrupt()
+        except Exception as e:  # noqa: BLE001 - 它不回应的话，过一会儿直接结束这一轮
+            log.warning("请引擎停下失败：%s", str(e) or type(e).__name__)
+
+    def _drop_sessions(self, conv: Conversation) -> None:
+        for session in (conv.session, conv.delegate):
+            if session is not None:
+                self.loop.create_task(session.close())
+        conv.session = conv.delegate = None
 
     def _check_outcome(self, conv: Conversation, done: dict, answer: str) -> None:
         """操作模式下，回合正常结束不等于事情办成了：看汇报第一行。没办成是因为浏览器操作没接通时，附上修法。"""
