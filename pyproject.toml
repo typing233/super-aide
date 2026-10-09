@@ -1,0 +1,70 @@
+[project]
+name = "super-aide"
+version = "0.1.0"
+description = "超级助手（Super Aide）：Windows 桌面助手，按快捷键召唤，看着屏幕回答问题或直接动手；调度 Claude Code / Codex"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "typing233" }]
+keywords = ["assistant", "desktop", "windows", "claude-code", "codex", "agent"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3.12",
+    "Natural Language :: Chinese (Simplified)",
+    "Natural Language :: English",
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pyside6>=6.8",
+    "mss>=9.0",
+    "uiautomation>=2.0",
+    "pywin32>=306",
+    "pillow>=10.0",
+    "claude-agent-sdk",
+    "openai-codex",
+    "psutil>=6.0",
+    "tomli-w>=1.0",
+    "mcp>=2.3",  # 自研 Computer Use 的工具服务器
+    # Windows 自带的离线 OCR：界面没交出文字的地方认图
+    "winrt-runtime>=3.2",
+    "winrt-Windows.Media.Ocr>=3.2",
+    "winrt-Windows.Graphics.Imaging>=3.2",
+    "winrt-Windows.Storage.Streams>=3.2",
+    "winrt-Windows.Foundation>=3.2",
+    "winrt-Windows.Foundation.Collections>=3.2",
+    "winrt-Windows.Globalization>=3.2",
+    # 本地向量模型（经验按意思想起），离线运行，不要显卡
+    "numpy>=2.0",
+    "onnxruntime>=1.20",
+    "sentencepiece>=0.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/typing233/super-aide"
+Repository = "https://github.com/typing233/super-aide"
+Issues = "https://github.com/typing233/super-aide/issues"
+Releases = "https://github.com/typing233/super-aide/releases"
+
+# 不带控制台窗口的启动器（安装后是 super-aide.exe）
+[project.gui-scripts]
+super-aide = "super_aide.app:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/super_aide"]
+# 发版时生成的文件（被 .gitignore 忽略，但要打进包里）：依赖的确切版本、仓库地址
+artifacts = ["src/super_aide/_release/*"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/spikes", "/installer/out", "/.github"]
+# 打包时先打 sdist、再从 sdist 打 wheel：sdist 里也要带上发版时生成的文件，不然 wheel 里就没有了
+artifacts = ["src/super_aide/_release/*"]

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>内容读取靶子</title>
+<style>
+  body { background: #1e1e1e; color: #d4d4d4; font: 15px/1.5 Consolas, monospace; margin: 24px; }
+  .cell { border-left: 3px solid #3a3d41; padding: 8px 12px; margin: 14px 0; background: #252526; }
+  .err { background: #3b1e1e; color: #f48771; white-space: pre; padding: 8px 12px; }
+  pre { margin: 0; }
+  .filler p { color: #888; margin: 6px 0; }
+  iframe { border: 0; height: 40px; width: 640px; display: block; }
+</style>
+</head>
+<body>
+<h3>notebook.ipynb</h3>
+<div class="cell"><pre id="code1"># 导入模型和分词器
+from modescope import AutoModelForCausalLM, AutoTokenizer
+
+# 指定模型名称
+model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+tokenizer = AutoTokenizer.from_pretrained(model_name)</pre></div>
+<div class="err" id="err1">ModuleNotFoundError                       Traceback (most recent call last)
+Cell In[1], line 2
+      1 # 导入模型和分词器
+----> 2 from modescope import AutoModelForCausalLM, AutoTokenizer
+
+ModuleNotFoundError: No module named 'modescope'</div>
+<div class="cell"><pre id="code2">tokenizer</pre></div>
+<div class="err" id="err2">NameError: name 'tokenizer' is not defined</div>
+<iframe srcdoc="<body style='margin:0;background:#1e1e1e'><p style='color:#ccc;font:14px sans-serif;margin:8px 0'>框架里的文字：IFRAME-MARKER-7731</p></body>"></iframe>
+<canvas id="canvas" width="560" height="64"></canvas>
+<div class="filler" id="filler"></div>
+<p id="end">页面最底部的文字：END-OF-PAGE-MARKER-4409</p>
+<script>
+  const ctx = document.getElementById("canvas").getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "30px Consolas";
+  ctx.fillText("CANVAS 8812 ONLY PIXELS", 8, 42);
+  const filler = document.getElementById("filler");
+  for (let i = 1; i <= 120; i++) {
+    const p = document.createElement("p");
+    p.textContent = `第 ${i} 段填充文字，用来把页面撑长，让后面的内容滚动到可视区之外。`;
+    filler.appendChild(p);
+  }
+</script>
+</body>
+</html>

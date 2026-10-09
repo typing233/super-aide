@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>CU 网页靶子</title>
+  <style>
+    body { font-family: "Microsoft YaHei UI", sans-serif; margin: 32px; }
+    label { display: block; margin: 12px 0 4px; }
+    input[type=text], select, textarea { width: 320px; padding: 6px; font-size: 15px; }
+    button { margin-top: 16px; padding: 8px 20px; font-size: 15px; }
+    #result { margin-top: 16px; color: #0a7; }
+    .card { cursor: pointer; display: inline-block; margin-top: 16px; padding: 8px 12px; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h1>网页靶子</h1>
+  <label for="name">姓名</label>
+  <input id="name" type="text" placeholder="请输入姓名">
+  <label for="city">城市</label>
+  <select id="city"><option>北京</option><option>上海</option><option>广州</option><option>深圳</option></select>
+  <label><input id="agree" type="checkbox"> 我同意条款</label>
+  <label for="notes">备注</label>
+  <textarea id="notes" rows="3"></textarea>
+  <div><button id="submit" type="button">提交</button></div>
+  <div class="card" id="card" role="button" tabindex="0">React 风格的卡片按钮</div>
+  <div id="result">还没有提交</div>
+  <p><a href="#section2" id="link">跳到第二部分</a></p>
+  <div style="height: 1400px"></div>
+  <h2 id="section2">第二部分</h2>
+  <button id="far" type="button">远处的按钮</button>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let n = 0;
+    $('submit').addEventListener('click', () => {
+      n += 1;
+      $('result').textContent = `已提交 ${n} 次：${$('name').value}｜${$('city').value}｜${$('agree').checked ? '同意' : '不同意'}｜${$('notes').value}`;
+      document.title = `CU 网页靶子 已提交${n}`;
+    });
+    // 只听 pointerdown 的按钮（很多前端框架这样写），检验合成点击能不能触发
+    $('card').addEventListener('pointerdown', () => { $('result').textContent = '卡片按下了'; });
+    $('far').addEventListener('click', () => { $('result').textContent = '远处的按钮被点了'; });
+  </script>
+</body>
+</html>

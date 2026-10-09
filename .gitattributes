@@ -1,0 +1,5 @@
+# 仓库里统一存 LF；Windows 脚本检出时（含 GitHub 的 ZIP 下载）一律 CRLF，cmd 遇到 LF 换行偶尔会找不到标签
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf

@@ -1,0 +1,26 @@
+# 每次推送和拉取请求：跑单元测试，顺便编译一下安装器（确认没编译错误）。
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: 安装依赖（按 uv.lock）
+        run: uv sync --frozen
+
+      - name: 单元测试
+        run: uv run python -m pytest -q
+
+      - name: 编译安装器
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_installer.ps1 -Repo "${{ github.repository }}"

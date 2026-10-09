@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark" data-mode="ask">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n>超级助手设置</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="settings.css">
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+  <main id="shell">
+    <section class="surface settings">
+      <header class="titlebar" id="titlebar">
+        <span class="orb" aria-hidden="true"></span>
+        <h1 data-i18n>设置</h1>
+        <span class="saved" id="saved" data-i18n>已保存</span>
+        <button class="icon-btn" id="close" title="关闭（Esc）" data-i18n-title="关闭（Esc）">
+          <svg viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>
+        </button>
+      </header>
+
+      <div class="scroll" id="scroll">
+        <p class="banner" id="banner" hidden></p>
+
+        <h2 data-i18n>快捷键</h2>
+        <div class="tile">
+          <div class="row">
+            <div class="label"><span data-i18n>问答</span><small data-i18n>只回答，不动你的电脑</small></div>
+            <button class="keycap" data-hotkey="ask" title="点一下，然后按下新的组合键" data-i18n-title="点一下，然后按下新的组合键"></button>
+          </div>
+          <div class="row">
+            <div class="label"><span data-i18n>操作</span><small data-i18n>回答，并直接动手做完</small></div>
+            <button class="keycap" data-hotkey="act" title="点一下，然后按下新的组合键" data-i18n-title="点一下，然后按下新的组合键"></button>
+          </div>
+        </div>
+        <p class="note" id="hotkey-note"></p>
+
+        <h2 data-i18n>外观</h2>
+        <div class="tile">
+          <div class="row">
+            <div class="label" data-i18n>主题</div>
+            <div class="segmented" id="theme">
+              <button data-value="system" data-i18n>跟随系统</button>
+              <button data-value="light" data-i18n>浅色</button>
+              <button data-value="dark" data-i18n>深色</button>
+            </div>
+          </div>
+          <div class="row">
+            <div class="label" data-i18n>语言</div>
+            <div class="segmented" id="language">
+              <button data-value="system" data-i18n>跟随系统</button>
+              <button data-value="zh">中文</button>
+              <button data-value="en">English</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-head">
+          <h2 data-i18n>可路由的模型</h2>
+          <input class="filter" id="model-filter" type="text" placeholder="筛选" data-i18n-placeholder="筛选" autocomplete="off" spellcheck="false">
+          <button class="text-btn" id="refresh" data-i18n>刷新列表</button>
+        </div>
+        <p class="desc" data-i18n>自动路由只在打开的模型里挑，先保证办成：更快、更省的模型或更低的思考强度，证明一样能办成才会用。思考强度不超过每个模型右边的上限。</p>
+        <div id="engines"></div>
+        <p class="note error" id="model-note"></p>
+        <div class="tile">
+          <div class="row">
+            <div class="label"><span data-i18n>后台对比</span><small data-i18n>问答答完后，用更快、更省的配置在后台把同一个问题再答一遍，由强模型对比；你看到的始终是当前最可靠的那份。会多花一点费用</small></div>
+            <button class="switch" id="shadow-eval" role="switch" aria-label="后台对比" data-i18n-aria-label="后台对比"></button>
+          </div>
+        </div>
+
+        <h2 data-i18n>隐私</h2>
+        <div class="tile">
+          <div class="row stacked">
+            <div class="label"><span data-i18n>不看这些应用</span><small data-i18n>它们的窗口在截图里涂黑，也不读里面的文字</small></div>
+            <div class="chips" id="blocked">
+              <input class="chip-input" id="blocked-input" type="text" placeholder="添加，例如 KeePass.exe" data-i18n-placeholder="添加，例如 KeePass.exe"
+                     autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="row">
+            <div class="label"><span data-i18n>带上刚复制的内容</span><small data-i18n>复制后这么久之内提问，会把剪贴板一起交给助手</small></div>
+            <div class="segmented" id="clipboard">
+              <button data-value="0" data-i18n>不带</button>
+              <button data-value="60" data-i18n>1 分钟</button>
+              <button data-value="300" data-i18n>5 分钟</button>
+              <button data-value="1800" data-i18n>30 分钟</button>
+            </div>
+          </div>
+        </div>
+
+        <h2 data-i18n>通用</h2>
+        <div class="tile">
+          <div class="row">
+            <div class="label" data-i18n>开机自动启动</div>
+            <button class="switch" id="autostart" role="switch" aria-label="开机自动启动" data-i18n-aria-label="开机自动启动"></button>
+          </div>
+          <div class="row">
+            <div class="label"><span data-i18n>界面操作</span><small id="browser-note"></small></div>
+            <span class="status-pill" id="browser-status"></span>
+          </div>
+          <div class="row">
+            <div class="label"><span data-i18n>环境检查</span><small id="setup-note"></small></div>
+            <button class="text-btn" id="open-setup" data-i18n>检查</button>
+          </div>
+          <div class="row">
+            <div class="label"><span data-i18n>版本</span><small id="version-note"></small></div>
+            <button class="text-btn" id="update-btn">检查更新</button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="foot">
+        <span data-i18n>改动立即生效</span>
+        <a href="#" id="open-config" data-i18n>打开配置文件</a>
+      </footer>
+    </section>
+  </main>
+
+  <div class="menu" id="effort-menu" hidden></div>
+  <script src="i18n-en.js"></script>
+  <script src="i18n.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

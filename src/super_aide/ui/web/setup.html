@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark" data-mode="ask">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n>准备超级助手</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="setup.css">
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+  <main id="shell">
+    <section class="surface settings setup">
+      <header class="titlebar" id="titlebar">
+        <span class="orb" aria-hidden="true"></span>
+        <h1 id="title">准备超级助手</h1>
+        <button class="icon-btn" id="close" title="关闭（Esc）" data-i18n-title="关闭（Esc）">
+          <svg viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>
+        </button>
+      </header>
+
+      <div class="scroll" id="scroll">
+        <p class="lead" id="lead" data-i18n>超级助手借助 Claude Code 和 Codex 回答问题、动手做事，直接用它们自己的模型配置。先确认它们装好、配好了模型。</p>
+
+        <div class="tile decide" id="decide" hidden>
+          <div class="label"><span data-i18n>检测到 DeepSeek Harness</span>
+            <small data-i18n>Claude Code 和 Codex 还没装全。装上效果更好；不装也能先用 DeepSeek Harness。</small>
+          </div>
+          <div class="decide-actions">
+            <button class="text-btn" id="use-dsh" data-i18n>先只用 DeepSeek Harness</button>
+            <button class="primary small" id="install-all" data-i18n>安装（推荐）</button>
+          </div>
+        </div>
+
+        <div class="tile" id="tools"></div>
+        <p class="note" id="note"></p>
+      </div>
+
+      <footer class="foot setup-foot">
+        <button class="text-btn" id="recheck" data-i18n>重新检查</button>
+        <span class="hint" id="hint"></span>
+        <button class="primary" id="start" disabled>开始使用</button>
+      </footer>
+    </section>
+  </main>
+  <script src="i18n-en.js"></script>
+  <script src="i18n.js"></script>
+  <script src="setup.js"></script>
+</body>
+</html>

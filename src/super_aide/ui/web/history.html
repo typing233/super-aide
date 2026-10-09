@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark" data-mode="ask">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n>超级助手历史记录</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="history.css">
+  <script src="vendor/marked.min.js"></script>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+  <main id="shell">
+    <section class="surface settings history">
+      <header class="titlebar" id="titlebar">
+        <span class="orb" aria-hidden="true"></span>
+        <h1 data-i18n>历史记录</h1>
+        <input class="filter search" id="search" type="text" placeholder="搜索问题和回答" data-i18n-placeholder="搜索问题和回答" autocomplete="off" spellcheck="false">
+        <button class="icon-btn" id="close" title="关闭（Esc）" data-i18n-title="关闭（Esc）">
+          <svg viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>
+        </button>
+      </header>
+      <div class="panes">
+        <nav class="list" id="list"></nav>
+        <article class="detail" id="detail"></article>
+      </div>
+    </section>
+  </main>
+  <script src="i18n-en.js"></script>
+  <script src="i18n.js"></script>
+  <script src="history.js"></script>
+</body>
+</html>

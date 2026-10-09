@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark" data-mode="ask">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n>超级助手</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="vendor/marked.min.js"></script>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+  <main id="root">
+
+    <!-- ① 召唤：输入框 -->
+    <section id="input-view" class="surface input-bar">
+      <span class="orb" aria-hidden="true"></span>
+      <input id="input" type="text" autocomplete="off" spellcheck="false">
+      <span id="recent-hint" class="kbd-hint" hidden data-i18n>Ctrl+↵ 接着上次</span>
+      <span class="mode-chip" id="mode-chip">问答</span>
+    </section>
+
+    <!-- ② 回答卡片 -->
+    <section id="card-view" class="surface card" hidden>
+      <header class="card-head">
+        <span class="question" id="question"></span>
+        <button class="icon-btn rate" id="rate-good" title="答得好" data-i18n-title="答得好">
+          <svg viewBox="0 0 20 20"><path d="M7 9l3-5.5a1.6 1.6 0 0 1 2.9 1.1L12.4 8h3a1.6 1.6 0 0 1 1.6 1.9l-1 5A1.6 1.6 0 0 1 14.4 16H7zM7 9H4.5v7H7"/></svg>
+        </button>
+        <button class="icon-btn rate" id="rate-bad" title="没答好" data-i18n-title="没答好">
+          <svg viewBox="0 0 20 20"><path d="M13 11l-3 5.5a1.6 1.6 0 0 1-2.9-1.1l.5-3.4h-3a1.6 1.6 0 0 1-1.6-1.9l1-5A1.6 1.6 0 0 1 5.6 4H13zM13 11h2.5V4H13"/></svg>
+        </button>
+        <button class="icon-btn" id="copy-all" title="复制回答" data-i18n-title="复制回答">
+          <svg viewBox="0 0 20 20"><rect x="7" y="7" width="9.5" height="9.5" rx="2"/><path d="M13 7V5.5A1.5 1.5 0 0 0 11.5 4h-6A1.5 1.5 0 0 0 4 5.5v6A1.5 1.5 0 0 0 5.5 13H7"/></svg>
+        </button>
+        <button class="icon-btn" id="close" title="关闭（Esc）" data-i18n-title="关闭（Esc）">
+          <svg viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>
+        </button>
+      </header>
+      <div class="status-line" id="status-line"></div>
+      <div class="steps" id="steps" hidden></div>
+      <article class="answer md" id="answer"></article>
+      <footer class="followup">
+        <span class="orb" aria-hidden="true"></span>
+        <input id="followup" type="text" autocomplete="off" spellcheck="false">
+        <span class="kbd-hint" id="followup-hint">Tab 让我来做</span>
+      </footer>
+    </section>
+
+    <!-- ③ 操作中：胶囊 -->
+    <section id="pill-view" class="pill-group" hidden>
+      <div class="surface pill">
+        <span class="orb" aria-hidden="true"></span>
+        <span class="pill-text" id="pill-text"></span>
+        <span class="pill-time" id="pill-time">0:00</span>
+      </div>
+      <div class="surface pill-note" id="pill-note" data-i18n>你可以继续用电脑，不会打扰助手</div>
+    </section>
+
+    <!-- ④ 完成：结果提示 -->
+    <section id="toast-view" class="surface toast" hidden>
+      <span class="check" aria-hidden="true">
+        <svg viewBox="0 0 20 20"><path d="M5 10.5l3.2 3.2L15 7"/></svg>
+      </span>
+      <div class="toast-body">
+        <div class="toast-title" id="toast-title"></div>
+        <div class="toast-links"><a href="#" id="toast-detail" data-i18n>查看过程</a><span>·</span><a href="#" id="toast-followup" data-i18n>继续问</a></div>
+      </div>
+    </section>
+
+    <!-- ⑤ 分步骤的回答：点了别处后缩到屏幕边上，边看边做 -->
+    <section id="dock-view" class="surface dock" hidden>
+      <header class="dock-head">
+        <span class="dock-title" id="dock-title"></span>
+        <button class="icon-btn" id="dock-expand" title="展开" data-i18n-title="展开">
+          <svg viewBox="0 0 20 20"><path d="M11.5 4.5h4v4M8.5 15.5h-4v-4M15.5 4.5L11 9M4.5 15.5L9 11"/></svg>
+        </button>
+        <button class="icon-btn" id="dock-close" title="关闭" data-i18n-title="关闭">
+          <svg viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>
+        </button>
+      </header>
+      <article class="dock-steps md" id="dock-steps"></article>
+    </section>
+
+  </main>
+
+  <!-- 仅在普通浏览器里预览时出现 -->
+  <nav id="demo" hidden>
+    <button data-demo="ask" data-i18n>问答输入</button>
+    <button data-demo="act" data-i18n>操作输入</button>
+    <button data-demo="answer" data-i18n>回答卡片</button>
+    <button data-demo="pill" data-i18n>操作胶囊</button>
+    <button data-demo="toast" data-i18n>结果提示</button>
+    <button data-demo="dock" data-i18n>贴边步骤</button>
+    <button data-demo="theme" data-i18n>切换深浅</button>
+  </nav>
+
+  <script src="i18n-en.js"></script>
+  <script src="i18n.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

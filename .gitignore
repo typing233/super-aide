@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+build/
+# P0 验证产生的会话快照（含截图和窗口文字，可能有隐私内容）
+spikes/out/
+# 发版时生成、随包发布（依赖的确切版本、仓库地址）：scripts/release/prepare.py
+src/super_aide/_release/
+# 安装器的编译产物
+installer/out/
