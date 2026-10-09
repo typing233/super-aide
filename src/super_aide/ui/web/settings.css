@@ -511,3 +511,168 @@ h2 {
 }
 
 .foot a:hover { color: var(--text); }
+
+/* ---------- 高级：自我改进、社区共建 ---------- */
+
+.tile.gap { margin-top: 10px; }
+
+/* 正在改进：模式色光点轻轻呼吸，和回答卡片"思考中"一样 */
+.evolve-now { justify-content: flex-start; gap: 12px; }
+.evolve-now .label { flex: 1; min-width: 0; }
+.evolve-now .label > span,
+.evolve-now .label small {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.evolve-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--a), var(--b));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a) 16%, transparent);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+.evolve-time {
+  flex: none;
+  font-size: 12.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+  outline: 0;
+  background: var(--control);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text);
+  caret-color: var(--a);
+}
+
+textarea::placeholder { color: var(--text-3); }
+textarea:focus { border-color: color-mix(in srgb, var(--a) 45%, transparent); }
+
+.suggest-foot { display: flex; justify-content: flex-end; }
+
+/* 最近的改进：一条一行，点开看详情和改动 */
+.evolve-list { border-top: 1px solid var(--divider); padding: 4px 0; }
+.evolve-list[hidden] { display: none; }
+
+.evo-item + .evo-item { border-top: 1px solid var(--divider); }
+
+.evo-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 4px 10px 4px 16px;
+  cursor: default;
+}
+
+.evo-line:hover { background: var(--hover); }
+
+.evo-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.evo-mark.ok { background: var(--ok); }
+.evo-mark.bad { background: var(--err); }
+.evo-mark.ready, .evo-mark.busy { background: linear-gradient(135deg, var(--a), var(--b)); }
+.evo-mark.busy { animation: breathe 1.6s ease-in-out infinite; }
+.evo-mark.none { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.evo-mark.wait { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
+
+.evo-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.evo-meta {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.evo-actions { flex: none; display: flex; gap: 2px; }
+.evo-actions .text-btn { height: 26px; padding: 0 8px; }
+
+.text-btn.danger { color: var(--err); }
+
+.evo-detail {
+  padding: 2px 16px 12px 33px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.evo-kvs { display: grid; grid-template-columns: max-content 1fr; column-gap: 14px; }
+.evo-kvs .k { white-space: nowrap; color: var(--text-3); }
+.evo-kvs .v { min-width: 0; color: var(--text-2); white-space: pre-line; overflow-wrap: anywhere; }
+
+.evo-detail > .text-btn { margin: 6px 0 0 -10px; }
+
+.evo-privacy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 10px 33px;
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--err) 75%, var(--text));
+}
+
+.evo-privacy > span { flex: 1; min-width: 0; }
+
+.evo-empty { font-size: 12.5px; color: var(--text-3); }
+.evo-empty.pad { padding: 14px 16px; }
+
+/* 改动：等宽、增删着色、框内滚动 */
+.diff {
+  margin: 8px 0 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--code-bg);
+  color: var(--code-text);
+  font: 12px/1.55 var(--mono);
+  white-space: pre;
+  user-select: text;
+}
+
+.diff .add { color: #7EE2A8; }
+.diff .del { color: #FF8F8F; }
+.diff .hunk { color: #8FA8FF; }
+
+/* GitHub 设备码登录 */
+.login-row { gap: 6px; }
+.login-row .label { flex: 1; min-width: 0; }
+
+.device-code {
+  font: 600 14px var(--mono);
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--control);
+  user-select: text;
+}
+
+#community-head[hidden], #community-tile[hidden] { display: none; }

@@ -8,7 +8,7 @@ import threading
 from typing import Protocol
 
 from PySide6.QtCore import QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 
 from .. import __version__, autostart, config, i18n, paths, update
 from ..i18n import app_name, tr
@@ -34,6 +34,8 @@ class SettingsHost(Protocol):
     def open_setup(self) -> None: ...
     def apply_update(self, release: update.Release | None) -> str: ...
 
+    evolve: object  # EvolveManager
+
 
 class SettingsBridge(WindowBridge):
     """网页通过 QWebChannel 调用这些槽。"""
@@ -57,6 +59,7 @@ class SettingsBridge(WindowBridge):
         data["tools"] = self._tools
         data["version"] = __version__
         data["lang"] = i18n.lang()
+        data["evolve_state"] = self.host.evolve.snapshot()  # 进度和记录（data["evolve"] 是配置：开关、社区共建）
         return data
 
     @Slot(result=str)
@@ -127,6 +130,62 @@ class SettingsBridge(WindowBridge):
     def applyUpdate(self) -> str:  # noqa: N802
         return self.host.apply_update(self._release)
 
+    # ---- 自我改进 ----
+
+    @Slot(str, result=str)
+    def suggest(self, text: str) -> str:
+        return json.dumps(self.host.evolve.suggest(text), ensure_ascii=False)
+
+    @Slot(str, result=str)
+    def evolveDiff(self, job_id: str) -> str:  # noqa: N802
+        return self.host.evolve.diff(job_id)
+
+    @Slot(str, result=str)
+    def evolveApply(self, job_id: str) -> str:  # noqa: N802
+        """你点了"生效"：换包、重启（超级助手会先退出）。返回没能开始的原因。"""
+        return self.host.evolve.apply(job_id)
+
+    @Slot(str, result=str)
+    def evolveUndo(self, job_id: str) -> str:  # noqa: N802
+        return self.host.evolve.undo(job_id)
+
+    @Slot(str)
+    def evolveDiscard(self, job_id: str) -> None:  # noqa: N802
+        self.host.evolve.discard(job_id)
+
+    @Slot(str, bool)
+    def privacyDecision(self, job_id: str, submit: bool) -> None:  # noqa: N802
+        self.host.evolve.privacy_decision(job_id, submit)
+
+    @Slot()
+    def githubLogin(self) -> None:  # noqa: N802
+        self.host.evolve.login_start()
+
+    @Slot()
+    def githubCancel(self) -> None:  # noqa: N802
+        self.host.evolve.login_cancel()
+
+    @Slot()
+    def githubLogout(self) -> None:  # noqa: N802
+        self.host.evolve.logout()
+
+    @Slot()
+    def communityCheck(self) -> None:  # noqa: N802
+        self.host.hub._submit(self.host.evolve.review_community())
+
+    @Slot(int, result=str)
+    def communityMerge(self, number: int) -> str:  # noqa: N802
+        return self.host.evolve.merge_community(number)
+
+    @Slot(str)
+    def openUrl(self, url: str) -> None:  # noqa: N802
+        if url.startswith(("http://", "https://")):
+            QDesktopServices.openUrl(QUrl(url))
+
+    @Slot(str)
+    def copy(self, text: str) -> None:
+        QGuiApplication.clipboard().setText(text)
+
 
 class SettingsWindow(WebWindow):
     def __init__(self, host: SettingsHost) -> None:
@@ -138,6 +197,25 @@ class SettingsWindow(WebWindow):
 
     def _js(self, code: str) -> None:
         self.js(f"window.settings && {code}")
+
+    def open(self, section: str = "") -> None:
+        """section：打开后滚到哪一节（托盘里点"正在自我改进"时是 evolve）。"""
+        if section:
+            self._js(f"settings.focusSection({json.dumps(section)})")
+            self.pending_section = section
+        self.host.evolve.check_contributor()  # 装了 gh 并登录过：顺手看看是不是维护者
+        super().open()
+
+    def _on_rendered(self) -> None:
+        super()._on_rendered()
+        section = getattr(self, "pending_section", "")
+        if section:
+            self._js(f"settings.focusSection({json.dumps(section)})")
+            self.pending_section = ""
+
+    def evolve_changed(self, state: dict) -> None:
+        if self.isVisible():
+            self._js(f"settings.evolveChanged({json.dumps(state, ensure_ascii=False)})")
 
     def reopened(self) -> None:
         self._js("settings.reload()")

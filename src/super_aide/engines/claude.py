@@ -374,6 +374,7 @@ class ClaudeSession:
                     "ok": not msg.is_error, "engine": "claude", "session": msg.session_id,
                     "cost": msg.total_cost_usd, "reason": msg.terminal_reason or msg.subtype,
                     "error": "; ".join(msg.errors or []) if msg.is_error else "",
+                    "api_error_status": msg.api_error_status,  # 接口故障（限流、过载、认证）时的状态码：不算能力失败
                 })
 
     async def interrupt(self) -> None:

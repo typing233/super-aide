@@ -14,6 +14,13 @@ const FOLLOWUP = { ask: '继续问…', act: '照这个帮我做' };
 const MODE_LABEL = { ask: '问答', act: '操作' };
 const ENGINE_NAME = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek' };
 const TOAST_MS = 8000;
+const STOP_TOAST_MS = 15000; // 按 Esc 停下后的提示多留一会儿：问你是不是助手哪里没做好
+const THANKS_MS = 1500;
+// 原因选项（交给自我改进）：stop = 按 Esc 停下以后，bad = 点了 👎 以后。不答就当不是助手的问题
+const REASONS = {
+  stop: [['wrong', '做错了'], ['slow', '太慢 / 卡住了'], ['misunderstood', '没懂我的意思'], ['not_assistant', '不是助手的问题']],
+  bad: [['wrong', '答错了'], ['screen', '没看懂屏幕'], ['verbose', '太啰嗦'], ['slow', '太慢']],
+};
 const PILL_NOTE_MS = 10000; // 操作中"可以继续用电脑"的提示显示这么久
 const DOCK_IDLE_MS = 10 * 60 * 1000; // 贴边的步骤 10 分钟没有交互就消失
 
@@ -152,6 +159,45 @@ function scheduleRender() {
 function resetRating() {
   $('#card-view').classList.remove('rated');
   for (const btn of document.querySelectorAll('.rate')) btn.classList.remove('chosen');
+  $('#bad-reasons').hidden = true;
+}
+
+// 一行原因：几个选项 + 一句补充。选了或回车就交出去，显示一句"谢谢"后收起
+function showReasons(box, kind, onDone) {
+  box.innerHTML = '';
+  const send = (choice, text) => {
+    if (bridge && choice !== 'not_assistant') bridge.reason(kind, choice, text);
+    box.innerHTML = '';
+    const thanks = el('span', 'thanks');
+    thanks.textContent = choice === 'not_assistant' ? I18N.t('好的') : I18N.t('谢谢，助手会据此改进自己');
+    box.append(thanks);
+    state.timers.push(setTimeout(() => { box.hidden = true; onDone(); }, THANKS_MS));
+  };
+  if (kind === 'bad') {
+    const q = el('span', 'reasons-q');
+    q.textContent = I18N.t('哪里不好？');
+    box.append(q);
+  }
+  for (const [choice, label] of REASONS[kind]) {
+    const chip = el('button', 'reason-chip');
+    chip.textContent = I18N.t(label);
+    chip.addEventListener('click', () => send(choice, input.value.trim()));
+    box.append(chip);
+  }
+  const input = el('input', 'reason-input');
+  input.type = 'text';
+  input.spellcheck = false;
+  input.placeholder = I18N.t('说说原因（可选），回车');
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && input.value.trim()) {
+      e.preventDefault();
+      e.stopPropagation();
+      send('', input.value.trim());
+    }
+  });
+  input.addEventListener('focus', () => clearTimeout(state.toastTimer));
+  box.append(input);
+  box.hidden = false;
 }
 
 function startCard(question) {
@@ -258,6 +304,10 @@ function finish(ev) {
     setStatus(live.error && (!live.draft || ev.hint) ? live.error : '', Boolean(live.error));
     $('#followup').focus();
   } else if (state.view === 'pill') {
+    if (ev.stopped) { // 你按 Esc 停下的：问一句是不是助手哪里没做好（不答就当不是）
+      showToast(I18N.t('已停止 · 是助手哪里没做好吗？'), true, true);
+      return;
+    }
     const ok = ev.ok && !live.error;
     // 汇报自己写了"没完成：…"（英文 Not done: …）或者是修法提示的，原样显示，不再套一层"没有完成"
     const failed = /^(没完成|未完成|暂未|未能|没能|浏览器操作|not done|not completed|couldn't|could not|unable to|failed|browser control)/i
@@ -267,18 +317,24 @@ function finish(ev) {
   }
 }
 
-function showToast(title, ok = true) {
+function showToast(title, ok = true, stopped = false) {
   $('#toast-title').textContent = title;
-  $('#toast-view').classList.toggle('failed', !ok);
+  const toast = $('#toast-view');
+  toast.classList.toggle('failed', !ok);
+  toast.classList.toggle('stopped', stopped);
+  const reasons = $('#stop-reasons');
+  if (stopped) showReasons(reasons, 'stop', dismiss);
+  else reasons.hidden = true;
   show('toast');
   armToastTimer();
 }
 
 function armToastTimer() {
   clearTimeout(state.toastTimer);
+  const asking = !$('#stop-reasons').hidden;
   state.toastTimer = setTimeout(() => {
-    if (state.view === 'toast') dismiss();
-  }, TOAST_MS);
+    if (state.view === 'toast' && document.activeElement?.className !== 'reason-input') dismiss();
+  }, asking ? STOP_TOAST_MS : TOAST_MS);
 }
 
 function openResultCard(focusFollowup) {
@@ -389,6 +445,10 @@ for (const [id, value] of [['#rate-good', 1], ['#rate-bad', -1]]) {
     $(id).classList.add('chosen');
     $('#card-view').classList.add('rated');
     if (bridge) bridge.feedback(value);
+    if (value < 0) { // 👎：这次没答好（交给自我改进）。原因可选，填了分析得更准
+      showReasons($('#bad-reasons'), 'bad', () => {});
+      $('#bad-reasons .reason-input').focus();
+    }
   });
 }
 $('#copy-all').addEventListener('click', () => copyText(live.draft || $('#answer').innerText));
@@ -518,6 +578,7 @@ if (window.qt && qt.webChannelTransport && window.QWebChannel) {
     else if (action === 'answer') { setMode('ask'); mockAnswer(placeholderFor('ask')); }
     else if (action === 'pill') { setMode('act'); mockAct(placeholderFor('act')); }
     else if (action === 'toast') { setMode('act'); live.question = placeholderFor('act'); showToast('已安装 pandas，脚本运行正常'); }
+    else if (action === 'stopped') { setMode('act'); live.question = placeholderFor('act'); showToast(I18N.t('已停止 · 是助手哪里没做好吗？'), true, true); }
     else if (action === 'dock') { Object.assign(live, { question: placeholderFor('ask'), draft: MOCK_ANSWER, done: true }); dock(); }
     else if (action === 'theme') html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
   });

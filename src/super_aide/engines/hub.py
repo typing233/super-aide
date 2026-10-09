@@ -9,6 +9,8 @@
 - 后台对比：问答答完、你这边空下来以后，用路由想试的更便宜/更快的配置在后台把同一个问题再答一遍（看不到实时界面），
   请强模型对比两份回答。路由只有在这样证明"一样好"之后才会换成它，你看到的永远是当前最可靠的那份。
 - 经验：提问时按这次的情况想起以前踩过的相似的坑（对不上就一条也不带）；对话结束后，走了弯路的总结成经验。
+- 自我改进：没办成（不算网络之类的故障）、我们自己的代码出错、你点了 👎、按 Esc 停下并说是助手的问题，
+  等这次对话结束（10 分钟没再接着问）后交给自我改进（evolve），由它分析、改进超级助手自己。
 某个引擎打不开时，暂时把它排除，换另一个引擎接着做。DeepSeek Harness 是可选的替代引擎（准备窗口里选了用它才参与）。
 """
 
@@ -19,6 +21,7 @@ import logging
 import random
 import threading
 import time
+import traceback
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +31,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from .. import history
+from ..evolve import evidence, triggers
 from ..experience import learn, recall
 from ..i18n import tr
 from ..experience.embed import Embedder
@@ -48,10 +52,10 @@ from .dsh import DshEngine
 
 log = logging.getLogger(__name__)
 
-INFRA_ERRORS = ("401", "403", "429", "timeout", "timed out", "network", "connection", "rate limit", "认证", "限流")
 MAX_REACTIVE = 2  # 一轮里做到一半最多再想起几次（每次最多 3 条）
 REASK_S = 600     # 这么久之内又问了几乎一样的问题（同一个程序、同样的内容）：上一次多半没答好
 DUEL_DELAY = 15   # 答完过一会儿再在后台对比，不跟你接着问抢
+EVOLVE_DELAY = 600  # 对话结束（这么久没再接着问；Ctrl+Enter 能在 10 分钟内接着问）后再交给自我改进，证据才完整
 
 
 SLOW_STEP = 20  # 一步用了这么久（秒）就在记录里写上，看得出卡在哪儿
@@ -63,9 +67,13 @@ def _note_slow_step(trace: list[str], seconds: float) -> None:
 
 
 def _counted(done: dict) -> bool:
-    """这一轮的结果算不算数：你中途停止、网络或认证问题、浏览器操作没接通，都和能力无关。"""
-    error = (done.get("error") or "").lower()
-    return not (done.get("reason") == "interrupted" or done.get("hint") or any(k in error for k in INFRA_ERRORS))
+    """这一轮的结果算不算数：你中途停止、网络或认证问题、接口故障、浏览器操作没接通，都和能力无关。"""
+    return not triggers.is_infra(done)
+
+
+def _crash(e: BaseException) -> dict:
+    """引擎或我们自己的代码抛了异常：这一轮的结束事件带上异常的类型和内容（分得清是网络问题还是代码问题）。"""
+    return {"ok": False, "error": friendly_error(e), "exception": f"{type(e).__name__}: {e}"[:500]}
 
 
 @dataclass
@@ -94,6 +102,9 @@ class Conversation:
     started: float = field(default_factory=time.time)
     first: tuple | None = None  # 首问原样的（问题, 消息, 图片）：后台对比用同一份再答一遍
     escalate: bool = False      # 上一轮没办成：下一轮换更强的配置
+    stopped: bool = False       # 这一轮是你按 Esc 停下的
+    trouble: list[dict] = field(default_factory=list)  # 这次对话里要交给自我改进的信号（没办成、👎、停下的原因）
+    evolve_timer: object | None = None
 
 
 class EngineHub(QObject):
@@ -119,6 +130,7 @@ class EngineHub(QObject):
         self.conversations: dict[str, Conversation] = {}
         self._last: dict[str, Conversation] = {}  # 每种模式最近一次提问（看是不是很快又问了一样的）
         self._duel_lock = asyncio.Lock()  # 后台对比一次只跑一个
+        self.evolve = None  # 自我改进（EvolveManager），由外面接上
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, name="engines", daemon=True)
         self.thread.start()
@@ -166,11 +178,20 @@ class EngineHub(QObject):
             self.loop.call_soon_threadsafe(self.router.record, conv.decision, conv.task, good, source)
         if conv is not None and not good:
             self.loop.call_soon_threadsafe(self._bad_turn, conv)
+            if source == "feedback":  # 你亲手点的 👎：这次任务没办好，交给自我改进（原因可以之后补上）
+                self.loop.call_soon_threadsafe(self._note_trouble, conv, {"kind": "thumbs_down"})
+
+    def reason(self, key: str, kind: str, choice: str, text: str) -> None:
+        """你给的原因：按 Esc 停下以后（kind=stop），或者点了 👎 以后（kind=bad）。"""
+        conv = self.conversations.get(key)
+        if conv is not None:
+            self.loop.call_soon_threadsafe(self._on_reason, conv, kind, choice, text.strip()[:1000])
 
     def interrupt(self, key: str) -> None:
         conv = self.conversations.get(key)
         if conv is None or not conv.busy:
             return
+        conv.stopped = True  # 引擎被打断后可能仍报"正常结束"：这一轮按你停下的算，不当成没办成
         for session in (conv.session, conv.delegate):
             if session is not None:
                 self._submit(session.interrupt())
@@ -273,7 +294,8 @@ class EngineHub(QObject):
         except Exception as e:  # noqa: BLE001
             log.exception("首问失败")
             self._emit(conv.key, Event("error", friendly_error(e)))
-            self._emit(conv.key, Event("done", data={"ok": False}))
+            self._emit(conv.key, Event("done", data=_crash(e)))
+            self._crashed(conv, e)
 
     async def _open(self, conv: Conversation) -> None:
         while True:
@@ -310,7 +332,8 @@ class EngineHub(QObject):
         except Exception as e:  # noqa: BLE001
             log.exception("追问失败")
             self._emit(conv.key, Event("error", friendly_error(e)))
-            self._emit(conv.key, Event("done", data={"ok": False}))
+            self._emit(conv.key, Event("done", data=_crash(e)))
+            self._crashed(conv, e)
 
     def _browser_status(self, conv: Conversation) -> browser_use.Status | None:
         """用 Codex 官方的浏览器操作、操作模式、前台是浏览器、而它没接通时，返回原因和修法。
@@ -333,7 +356,7 @@ class EngineHub(QObject):
                 "但它可能因为确定不了当前网址而停下。办不成就在汇报第一行写「没完成：浏览器操作还没接通」。"]
 
     async def _turn(self, conv: Conversation, text: str, images: list) -> None:
-        conv.busy, conv.delegated = True, False
+        conv.busy, conv.delegated, conv.stopped = True, False, False
         if conv.learn_timer is not None:
             conv.learn_timer.cancel()  # 还在接着问：等这次对话结束了再总结
         conv.reactive = 0
@@ -354,7 +377,11 @@ class EngineHub(QObject):
                     ev.data.setdefault("model", conv.decision.model if conv.decision else "")
                     ev.data["delegated"] = conv.delegated
                     ev.data.update(seconds=round(time.monotonic() - started), tools=len(trace))
-                    self._check_outcome(conv, ev.data, answer)
+                    if conv.stopped:
+                        ev.data.update(stopped=True, reason="interrupted")
+                    else:
+                        self._check_outcome(conv, ev.data, answer)
+                    self._watch_outcome(conv, ev.data)
                     conv.turns.append(ev.data)
                     self._learn_from_turn(conv, ev.data)
                     if len(conv.turns) == 1:
@@ -365,10 +392,13 @@ class EngineHub(QObject):
         except Exception as e:  # noqa: BLE001
             log.exception("引擎出错")
             self._emit(conv.key, Event("error", friendly_error(e)))
-            self._emit(conv.key, Event("done", data={"ok": False}))
+            self._emit(conv.key, Event("done", data=_crash(e) | ({"stopped": True} if conv.stopped else {})))
+            if not conv.stopped:
+                self._crashed(conv, e)
         finally:
             conv.busy = False
             self._schedule_learning(conv)
+            self._schedule_evolve(conv)
 
     def _check_outcome(self, conv: Conversation, done: dict, answer: str) -> None:
         """操作模式下，回合正常结束不等于事情办成了：看汇报第一行。没办成是因为浏览器操作没接通时，附上修法。"""
@@ -509,6 +539,59 @@ class EngineHub(QObject):
             # 这类任务它需要别人帮忙动界面：下次同类任务直接交给能动界面的引擎更快
             self.router.record(conv.decision, conv.task, False, "delegated")
 
+    # ---- 自我改进：攒下这次对话里的信号，对话结束后交出去 ----
+
+    def _watch_outcome(self, conv: Conversation, done: dict) -> None:
+        """这一轮没办成（而且不是网络之类的故障）：记一个信号。前台被限流时告诉自我改进先让一让。"""
+        if done.get("api_error_status") == 429 and self.evolve is not None:
+            self.evolve.on_rate_limited()
+        if not done.get("ok") and _counted(done):
+            self._note_trouble(conv, {"kind": "failure", "error": str(done.get("error") or "")[:500],
+                                      "reason": str(done.get("reason") or "")})
+
+    def _crashed(self, conv: Conversation, e: BaseException) -> None:
+        """我们自己的代码（或引擎）抛了异常：不是网络之类的故障就记一个信号，带上调用栈。"""
+        if not triggers.exception_is_infra(e):
+            self._note_trouble(conv, {"kind": "exception", "error": f"{type(e).__name__}: {e}"[:500],
+                                      "traceback": traceback.format_exc()[-6000:]})
+
+    def _on_reason(self, conv: Conversation, kind: str, choice: str, text: str) -> None:
+        if kind == "stop":
+            if triggers.stop_counts(choice, text):  # 不答、"不是助手的问题"、"改主意了"都不算
+                self._note_trouble(conv, {"kind": "stopped", "choice": choice, "text": text})
+            return
+        for item in reversed(conv.trouble):  # 👎 的原因补到那个信号上（已经交出去的，补给那个任务）
+            if item.get("kind") == "thumbs_down":
+                item.update(choice=choice, text=text)
+                return
+        if self.evolve is not None:
+            self.evolve.add_reason(conv.key, choice, text)
+
+    def _note_trouble(self, conv: Conversation, item: dict) -> None:
+        item.setdefault("t", time.time())
+        conv.trouble.append(item)
+        self._schedule_evolve(conv)
+
+    def _schedule_evolve(self, conv: Conversation) -> None:
+        if getattr(self, "evolve", None) is None or not conv.trouble:
+            return
+        if conv.evolve_timer is not None:
+            conv.evolve_timer.cancel()
+        conv.evolve_timer = self.loop.call_later(EVOLVE_DELAY, self._hand_to_evolve, conv)
+
+    def _hand_to_evolve(self, conv: Conversation) -> None:
+        conv.evolve_timer = None
+        if conv.busy:
+            self._schedule_evolve(conv)
+            return
+        trouble, conv.trouble = conv.trouble, []
+        if not trouble or self.evolve is None:
+            return
+        try:
+            self.evolve.submit(evidence.capture(conv, trouble))
+        except Exception:  # noqa: BLE001 - 交不出去不影响使用
+            log.exception("交给自我改进失败")
+
     # ---- 路由：看任务、加强、后台对比 ----
 
     def _vector(self, question: str, text: str):
@@ -610,7 +693,7 @@ class EngineHub(QObject):
                              candidate.effort, verdict.served, verdict.candidate, verdict.why)
             except Exception as e:  # noqa: BLE001 - 对比失败不影响使用
                 log.warning("后台对比失败：%s", friendly_error(e))
-                if not any(k in str(e).lower() for k in INFRA_ERRORS):
+                if not triggers.exception_is_infra(e):
                     self.router.record(candidate, conv.task, False, "duel")  # 比如这个模型根本用不了：别一直试它
             finally:
                 if session is not None:

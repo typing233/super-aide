@@ -34,6 +34,12 @@ const state = {
   savedTimer: null,
   refreshTimer: null,
   update: null,          // 最近一次检查更新的结果
+  focus: '',             // 打开后要滚到的那一节（托盘里点了"正在自我改进"）
+  opened: new Set(),     // 自我改进：展开了详情的那几条
+  diffs: {},             // 自我改进：展开了改动的那几条 → 补丁原文
+  confirming: '',        // 两步确认（撤销、不要了、合并）：第一次点过的那个按钮
+  confirmTimer: null,
+  ticker: null,          // 正在改进的那一行的计时
 };
 
 // ---------- 基础 ----------
@@ -132,6 +138,8 @@ function render() {
       : browser.problem.replace(/^(浏览器操作还没接通：|Browser control isn't connected yet: )/, '');
   $('#setup-note').textContent = setupNote(d.tools || {});
   renderUpdate();
+  renderEvolve();
+  if (state.focus) focusSection(state.focus);
 }
 
 // ---------- 版本和更新 ----------
@@ -170,6 +178,8 @@ function renderUpdate() {
     note.textContent = I18N.t('当前 {version}', { version: current });
     btn.textContent = I18N.t('检查更新');
   }
+  const evolved = state.data.evolve_state && state.data.evolve_state.evolved;
+  if (evolved && typeof u !== 'string') note.textContent += ` · ${I18N.t('已自我改进 {n} 次', { n: evolved })}`;
 }
 
 function checkUpdate() {
@@ -508,6 +518,324 @@ function addBlocked(raw) {
   save();
 }
 
+// ---------- 自我改进 ----------
+
+// 状态 → (标记, 说明)。说明是中文原文，显示时经 I18N.t()
+const EVOLVE_STATUS = {
+  queued: ['wait', '排队中'],
+  triage: ['busy', '正在看是不是助手的问题'],
+  running: ['busy', '正在改进'],
+  waiting: ['busy', '等网络恢复'],
+  login: ['bad', '需要登录或配置'],
+  ready: ['ready', '改好了，等你确认生效'],
+  applying: ['busy', '正在生效'],
+  done: ['ok', '已生效'],
+  none: ['none', '无需改进'],
+  covered: ['none', '前面的改进已经解决了'],
+  held: ['bad', '待你处理'],
+  failed: ['bad', '没改成'],
+  discarded: ['none', '你没要'],
+  rolled_back: ['bad', '新版本没能启动，已装回原来的版本'],
+  undone: ['none', '已撤销'],
+};
+const EVOLVE_PHASE = {
+  prepare: '正在准备', agent: '正在分析和修改', carry: '正在把本地改进移到新版本', check: '正在跑测试',
+  review: '正在复核', build: '正在打包',
+};
+const TRIGGER = { failure: '没办成', stopped: '你停下了', thumbs_down: '你点了 👎', suggestion: '你的建议', carry: '版本更新' };
+const VERDICT = { merge: ['ok', '建议合并'], problems: ['bad', '有问题'], duplicate: ['none', '重复'] };
+const CHECKS = { passed: 'CI 通过', failed: 'CI 没过', pending: 'CI 进行中', none: '没有 CI' };
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts * 1000);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fmtElapsed(ts) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${m}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// 两步确认：第一次点变成"确认撤销？"，3 秒内再点一次才算
+function confirmTwice(btn, key, label, action) {
+  if (state.confirming === key) {
+    clearTimeout(state.confirmTimer);
+    state.confirming = '';
+    action();
+    return;
+  }
+  state.confirming = key;
+  btn.textContent = label;
+  btn.classList.add('danger');
+  clearTimeout(state.confirmTimer);
+  state.confirmTimer = setTimeout(() => { state.confirming = ''; renderEvolve(); }, 3000);
+}
+
+function textBtn(label, onClick, cls = '') {
+  const b = el('button', `text-btn${cls ? ` ${cls}` : ''}`);
+  b.textContent = label;
+  b.addEventListener('click', (e) => { e.stopPropagation(); onClick(b); });
+  return b;
+}
+
+function renderDiff(text) {
+  const pre = el('pre', 'diff');
+  for (const line of text.split('\n')) {
+    const span = el('span', line.startsWith('+') && !line.startsWith('+++') ? 'add'
+      : line.startsWith('-') && !line.startsWith('---') ? 'del' : line.startsWith('@@') ? 'hunk' : '');
+    span.textContent = `${line}\n`;
+    pre.append(span);
+  }
+  return pre;
+}
+
+function evolveItem(job) {
+  const [mark, label] = EVOLVE_STATUS[job.status] || ['none', job.status];
+  const item = el('div', `evo-item${state.opened.has(job.id) ? ' open' : ''}`);
+  const line = el('div', 'evo-line');
+  const dot = el('span', `evo-mark ${mark}`);
+  const title = el('span', 'evo-title');
+  title.textContent = job.title || job.trigger;
+  title.title = job.title || job.trigger;
+  const meta = el('span', 'evo-meta');
+  meta.textContent = fmtTime(job.finished || job.created);
+  const actions = el('span', 'evo-actions');
+  const pr = job.pr || {};
+  if (job.status === 'ready') {
+    actions.append(textBtn(I18N.t('生效'), async () => {
+      const problem = await call('evolveApply', job.id);
+      if (problem) banner(problem);
+      else banner(I18N.t('正在换上新版本，超级助手会先退出，几秒后自动重新打开'));
+    }, 'accent'));
+    actions.append(textBtn(state.confirming === `discard-${job.id}` ? I18N.t('确认不要？') : I18N.t('不要了'),
+      (b) => confirmTwice(b, `discard-${job.id}`, I18N.t('确认不要？'), () => call('evolveDiscard', job.id))));
+  }
+  if (job.status === 'done' && job.can_undo) {
+    actions.append(textBtn(state.confirming === `undo-${job.id}` ? I18N.t('确认撤销？') : I18N.t('撤销'),
+      (b) => confirmTwice(b, `undo-${job.id}`, I18N.t('确认撤销？'), async () => {
+        const problem = await call('evolveUndo', job.id);
+        banner(problem || I18N.t('正在装回原来的版本，超级助手会先退出，几秒后自动重新打开'));
+      })));
+  }
+  if (pr.number) actions.append(textBtn(`PR #${pr.number}`, () => call('openUrl', pr.url)));
+  else if (pr.dup_of) actions.append(textBtn(I18N.t('同 #{n}', { n: pr.dup_of }), () => call('openUrl', pr.url)));
+  line.append(dot, title, meta, actions);
+  line.addEventListener('click', () => {
+    if (state.opened.has(job.id)) state.opened.delete(job.id);
+    else state.opened.add(job.id);
+    renderEvolve();
+  });
+  item.append(line);
+  if (job.privacy_pending) {
+    const row = el('div', 'evo-privacy');
+    const text = el('span');
+    text.textContent = I18N.t('改动里可能有个人信息，没有自动提交：{what}', { what: (pr.privacy || []).join(I18N.t('、')) });
+    row.append(text, textBtn(I18N.t('仍然提交'), () => call('privacyDecision', job.id, true)),
+      textBtn(I18N.t('不提交'), () => call('privacyDecision', job.id, false)));
+    item.append(row);
+  }
+  if (state.opened.has(job.id)) {
+    const detail = el('div', 'evo-detail');
+    const lines = [
+      [I18N.t('状态'), I18N.t(label)],
+      [I18N.t('起因'), job.trigger && job.trigger !== job.title
+        ? I18N.t('{what}：{detail}', { what: I18N.t(TRIGGER[job.kind] || job.kind), detail: job.trigger })
+        : I18N.t(TRIGGER[job.kind] || job.kind)],
+      [I18N.t('你说的'), job.reason],
+      [I18N.t('怎么改的'), job.summary],
+      [I18N.t('原因'), job.error],
+      [I18N.t('版本'), job.version],
+      [I18N.t('用的'), job.engine ? `${job.engine} · ${job.model} · ${job.effort}` : ''],
+    ];
+    const kvs = el('div', 'evo-kvs');  // 两列：标签、内容，内容对齐
+    for (const [k, v] of lines) {
+      if (!v || (job.kind === 'carry' && k === I18N.t('你说的'))) continue;
+      const key = el('span', 'k');
+      key.textContent = k;
+      const val = el('span', 'v');
+      val.textContent = v;
+      kvs.append(key, val);
+    }
+    detail.append(kvs);
+    if (['ready', 'done', 'held', 'undone', 'rolled_back', 'discarded', 'running'].includes(job.status)) {
+      const toggle = textBtn(state.diffs[job.id] !== undefined ? I18N.t('收起改动') : I18N.t('看看改了什么'), async () => {
+        if (state.diffs[job.id] !== undefined) delete state.diffs[job.id];
+        else state.diffs[job.id] = await call('evolveDiff', job.id) || '';
+        renderEvolve();
+      });
+      detail.append(toggle);
+      if (state.diffs[job.id] !== undefined) {
+        detail.append(state.diffs[job.id] ? renderDiff(state.diffs[job.id]) : Object.assign(el('div', 'evo-empty'),
+          { textContent: I18N.t('没有改动') }));
+      }
+    }
+    item.append(detail);
+  }
+  return item;
+}
+
+function renderEvolve() {
+  const ev = state.data.evolve_state;
+  if (!ev) return;
+  $('#evolve-switch').classList.toggle('on', Boolean((state.data.evolve || {}).enabled));
+  $('#evolve-note').textContent = !ev.available ? I18N.t('需要 Claude Code 或 Codex（装好并配好模型）')
+    : ev.editable ? I18N.t('从源码运行：改好的改动留在补丁里，不会换包生效')
+      : I18N.t('任务失败、你停下并说明原因、点 👎 或提建议时，分析原因、改进自己；测试和复核都通过后，等你确认生效');
+  // 正在改进的那一行
+  const now = $('#evolve-now');
+  const active = ev.active;
+  clearInterval(state.ticker);
+  if (active && active.status !== 'ready') {
+    now.hidden = false;
+    const [, label] = EVOLVE_STATUS[active.status] || ['', ''];
+    $('#evolve-now-title').textContent = I18N.t('{what}：{detail}', {
+      what: I18N.t(active.status === 'running' ? (EVOLVE_PHASE[active.phase] || '正在改进') : label),
+      detail: active.title || active.trigger,
+    });
+    const notes = [active.step, active.error && active.status !== 'running' ? active.error : '',
+      I18N.t('期间请不要关机，尽量保持联网'), ev.queued ? I18N.t('排队 {n} 个', { n: ev.queued }) : '']
+      .filter(Boolean);
+    $('#evolve-now-note').textContent = notes.join(' · ');
+    const tick = () => { $('#evolve-now-time').textContent = active.started ? fmtElapsed(active.started) : ''; };
+    tick();
+    state.ticker = setInterval(tick, 1000);
+  } else {
+    now.hidden = true;
+  }
+  // 最近的几条
+  const list = $('#evolve-list');
+  list.innerHTML = '';
+  for (const job of ev.items || []) {
+    if (active && job.id === active.id && active.status !== 'ready') continue;
+    list.append(evolveItem(job));
+  }
+  list.hidden = !list.children.length;
+  // 社区共建
+  const c = ev.contribute || {};
+  $('#contribute-title').textContent = c.maintainer ? I18N.t('稳定后提交到主版本') : I18N.t('参与社区共建');
+  $('#contribute-switch').classList.toggle('on', Boolean(c.enabled));
+  $('#contribute-note').textContent = c.login
+    ? I18N.t('已登录 @{login}：生效后稳定运行一天的改进，自动以你的账号提交 PR（只有代码改动，不带屏幕内容和日志）', { login: c.login })
+    : I18N.t('用 GitHub 账号登录后，生效后稳定运行一天的改进会自动提交给主版本，让大家都用上（只有代码改动，不带屏幕内容和日志）');
+  const loginRow = $('#login-row');
+  loginRow.hidden = !(c.pending || c.error);
+  if (c.error) {
+    $('#login-text').textContent = I18N.t('没能登录 GitHub');
+    $('#login-note').textContent = c.error;
+  } else if (c.code) {
+    $('#login-text').innerHTML = `${escapeHtml(I18N.t('在浏览器里输入'))} <code class="device-code">${escapeHtml(c.code)}</code>`;
+    $('#login-note').innerHTML = `<span class="shimmer">${escapeHtml(I18N.t('等你在浏览器里确认…'))}</span>`;
+  } else if (c.pending) {
+    $('#login-text').innerHTML = `<span class="shimmer">${escapeHtml(I18N.t('正在连接 GitHub…'))}</span>`;
+    $('#login-note').textContent = '';
+  }
+  $('#login-copy').hidden = $('#login-open').hidden = !c.code;
+  $('#login-cancel').textContent = c.error ? I18N.t('关闭') : I18N.t('取消');
+  // 社区改进（只在维护者的电脑上）
+  const items = ev.community || [];
+  const show = Boolean(c.maintainer);
+  $('#community-head').hidden = !show;
+  $('#community-tile').hidden = !show;
+  if (show) {
+    $('#community-title').textContent = items.length
+      ? I18N.t('社区改进 · {n} 个待审', { n: items.length }) : I18N.t('社区改进');
+    $('#community-check').textContent = ev.community_checking ? I18N.t('正在审…') : I18N.t('检查');
+    $('#community-check').disabled = Boolean(ev.community_checking);
+    const box = $('#community-list');
+    box.innerHTML = '';
+    if (!items.length) {
+      const empty = el('div', 'evo-empty pad');
+      empty.textContent = I18N.t('没有待审的社区 PR');
+      box.append(empty);
+    }
+    for (const pr of items) box.append(communityItem(pr));
+  }
+}
+
+function communityItem(pr) {
+  const [mark, label] = VERDICT[pr.verdict] || ['wait', '还没审'];
+  const item = el('div', `evo-item${state.opened.has(`pr-${pr.number}`) ? ' open' : ''}`);
+  const line = el('div', 'evo-line');
+  const title = el('span', 'evo-title');
+  title.textContent = `#${pr.number} ${pr.title}`;
+  const meta = el('span', 'evo-meta');
+  meta.textContent = [pr.verdict === 'duplicate' && pr.duplicate_of ? I18N.t('同 #{n}', { n: pr.duplicate_of })
+    : I18N.t(label), I18N.t(CHECKS[pr.checks] || '')].filter(Boolean).join(' · ');
+  const actions = el('span', 'evo-actions');
+  if (pr.verdict === 'merge') {
+    const key = `merge-${pr.number}`;
+    actions.append(textBtn(state.confirming === key ? I18N.t('确认合并？') : I18N.t('合并'),
+      (b) => confirmTwice(b, key, I18N.t('确认合并？'), async () => {
+        const problem = await call('communityMerge', pr.number);
+        if (problem) banner(problem);
+      }), 'accent'));
+  }
+  actions.append(textBtn(I18N.t('查看'), () => call('openUrl', pr.url)));
+  line.append(el('span', `evo-mark ${mark}`), title, meta, actions);
+  line.addEventListener('click', () => {
+    const key = `pr-${pr.number}`;
+    if (state.opened.has(key)) state.opened.delete(key);
+    else state.opened.add(key);
+    renderEvolve();
+  });
+  item.append(line);
+  if (state.opened.has(`pr-${pr.number}`)) {
+    const detail = el('div', 'evo-detail');
+    const kvs = el('div', 'evo-kvs');
+    for (const [k, v] of [[I18N.t('提交者'), pr.author], [I18N.t('审的结论'), pr.why],
+      [I18N.t('风险'), (pr.risks || []).join(I18N.t('；'))]]) {
+      if (!v) continue;
+      kvs.insertAdjacentHTML('beforeend', `<span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span>`);
+    }
+    detail.append(kvs);
+    item.append(detail);
+  }
+  return item;
+}
+
+function evolveChanged(snapshot) {
+  if (!state.data) return;
+  state.data.evolve_state = snapshot;
+  renderEvolve();
+  renderUpdate();
+}
+
+function focusSection(name) {
+  state.focus = name;
+  if (!state.data) return;
+  const target = name === 'evolve' ? $('#evolve-section') : null;
+  if (target) {
+    requestAnimationFrame(() => {
+      const scroll = $('#scroll');
+      const top = target.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - 8;
+      scroll.scrollTo({ top, behavior: 'smooth' });
+      state.focus = '';
+    });
+  }
+}
+
+async function sendSuggestion() {
+  const input = $('#suggest-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const btn = $('#suggest-send');
+  btn.disabled = true;
+  const resp = JSON.parse(await call('suggest', text) || '{}');
+  btn.disabled = false;
+  if (resp.error) {
+    $('#suggest-note').textContent = resp.error;
+    return;
+  }
+  input.value = '';
+  $('#suggest-note').textContent = resp.position > 1
+    ? I18N.t('收到了，排在第 {n} 个', { n: resp.position }) : I18N.t('收到了，马上开始');
+  setTimeout(() => { $('#suggest-note').textContent = ''; }, 6000);
+}
+
 // ---------- 事件 ----------
 
 document.addEventListener('keydown', (e) => {
@@ -519,6 +847,8 @@ document.addEventListener('keydown', (e) => {
   const field = document.activeElement;
   if (state.menuAnchor) {
     closeMenu();
+  } else if (field && field.tagName === 'TEXTAREA' && field.value) {
+    field.blur(); // 写了一半的建议：Esc 不清空也不关窗口
   } else if (field && field.tagName === 'INPUT' && field.value) {
     field.value = '';
     if (field.id === 'model-filter') renderEngines();
@@ -622,9 +952,40 @@ $('#autostart').addEventListener('click', async () => {
   flashSaved();
 });
 
+// 开关写在配置的 [evolve] 里（state.data.evolve），和别的设置一样改了就存；进度和记录在 state.data.evolve_state
+$('#evolve-switch').addEventListener('click', () => {
+  const cfg = state.data.evolve;
+  cfg.enabled = !cfg.enabled;
+  $('#evolve-switch').classList.toggle('on', cfg.enabled);
+  save();
+});
+
+$('#contribute-switch').addEventListener('click', () => {
+  const c = state.data.evolve_state.contribute || {};
+  const on = !c.enabled;
+  if (on && !c.login) call('githubLogin'); // 先登录 GitHub：页内显示设备码
+  c.enabled = on;
+  state.data.evolve.contribute = on ? 'on' : 'off';
+  $('#contribute-switch').classList.toggle('on', on);
+  save();
+});
+
+$('#suggest-send').addEventListener('click', sendSuggestion);
+$('#suggest-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.ctrlKey) {
+    e.preventDefault();
+    sendSuggestion();
+  }
+});
+$('#login-copy').addEventListener('click', () => call('copy', (state.data.evolve_state.contribute || {}).code || ''));
+$('#login-open').addEventListener('click', () => call('openUrl', (state.data.evolve_state.contribute || {}).uri
+  || 'https://github.com/login/device'));
+$('#login-cancel').addEventListener('click', () => call('githubCancel'));
+$('#community-check').addEventListener('click', () => call('communityCheck'));
+
 // ---------- 宿主调用的接口 ----------
 
-window.settings = { reload, modelsRefreshed, stopRecording, updateChecked };
+window.settings = { reload, modelsRefreshed, stopRecording, updateChecked, evolveChanged, focusSection };
 
 // ---------- 浏览器预览：模拟数据 ----------
 
@@ -660,8 +1021,33 @@ const PREVIEW_DATA = {
     codex: { installed: true, configured: true, detail: 'ChatGPT 账号登录' },
     dsh: { installed: false, configured: false, detail: '' },
   },
-  version: '0.1.0',
+  version: '0.2.0+aide.2',
   autostart: false,
+  evolve: { enabled: true, contribute: 'auto' },
+  evolve_state: {
+    enabled: true, available: true, editable: false, tool: 'claude · claude-opus-5-5 · max', queued: 1, evolved: 2,
+    active: { id: 'a', kind: 'failure', status: 'running', phase: 'check', step: '正在跑测试', title: '',
+              trigger: '帮我把这个 Notebook 跑通', started: Date.now() / 1000 - 754 },
+    items: [
+      { id: 'r', kind: 'stopped', status: 'ready', title: 'Esc 停下后把焦点还给原来的窗口', trigger: '帮我整理桌面',
+        summary: '停下后焦点留在了看不见的胶囊上，你接着打的字丢了。现在停下时把焦点还给原来的窗口。',
+        finished: Date.now() / 1000 - 300, version: '0.2.0+aide.3', engine: 'claude', model: 'claude-opus-5-5', effort: 'max', pr: {} },
+      { id: 'd', kind: 'suggestion', status: 'done', title: '读网址时先找地址栏', trigger: '读网址时先找地址栏',
+        reason: '侧边栏开着的时候经常读错网址', summary: '读网址时按地址栏的类名直接找，侧边栏里的网页不再混进来。',
+        finished: Date.now() / 1000 - 86400 * 2, version: '0.2.0+aide.2', can_undo: true,
+        pr: { number: 12, url: 'https://github.com/typing233/super-aide/pull/12' } },
+      { id: 'n', kind: 'thumbs_down', status: 'none', title: '服务暂时不可用，不是助手的问题', trigger: '这段话什么意思',
+        finished: Date.now() / 1000 - 86400 * 3, pr: {} },
+    ],
+    contribute: { setting: 'auto', enabled: true, login: 'typing233', maintainer: true, pending: false, code: '', uri: '', error: '' },
+    community: [
+      { number: 14, title: '读网址时先找地址栏', url: 'https://github.com/typing233/super-aide/pull/14', author: 'someone',
+        checks: 'passed', verdict: 'merge', why: '改动小，和问题对得上，测试覆盖了侧边栏的情况。', duplicate_of: 0, risks: [] },
+      { number: 15, title: '地址栏读取改用类名', url: 'https://github.com/typing233/super-aide/pull/15', author: 'other',
+        checks: 'pending', verdict: 'duplicate', why: '和 #14 解决的是同一件事，#14 更完整。', duplicate_of: 14, risks: [] },
+    ],
+    community_checking: false,
+  },
   browser: { ready: false, problem: '浏览器操作还没接通：在 Codex 应用的插件页里安装「Chrome」插件（用 ChatGPT 控制浏览器，Edge 也支持）。' },
 };
 
@@ -689,6 +1075,10 @@ const preview = {
   checkUpdate: () => setTimeout(() => updateChecked({ current: '0.1.0', latest: '0.2.0', newer: true, managed: true,
                                                       source: 'GitHub', error: '' }), 700),
   applyUpdate: () => '',
+  suggest: () => JSON.stringify({ id: 'x', position: 2 }),
+  evolveDiff: () => '--- a/src/super_aide/shell/controller.py\n+++ b/src/super_aide/shell/controller.py\n@@ -340,6 +340,7 @@\n     def _on_esc(self) -> None:\n         self.signals.stop()\n+        self._return_focus()\n         if self.hub.is_busy(self.conv_key):\n',
+  evolveApply: () => '',
+  evolveUndo: () => '',
 };
 
 // ---------- 启动 ----------

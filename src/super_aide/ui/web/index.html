@@ -36,6 +36,7 @@
           <svg viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>
         </button>
       </header>
+      <div class="reasons" id="bad-reasons" hidden></div>
       <div class="status-line" id="status-line"></div>
       <div class="steps" id="steps" hidden></div>
       <article class="answer md" id="answer"></article>
@@ -64,6 +65,7 @@
       <div class="toast-body">
         <div class="toast-title" id="toast-title"></div>
         <div class="toast-links"><a href="#" id="toast-detail" data-i18n>查看过程</a><span>·</span><a href="#" id="toast-followup" data-i18n>继续问</a></div>
+        <div class="reasons" id="stop-reasons" hidden></div>
       </div>
     </section>
 
@@ -90,6 +92,7 @@
     <button data-demo="answer" data-i18n>回答卡片</button>
     <button data-demo="pill" data-i18n>操作胶囊</button>
     <button data-demo="toast" data-i18n>结果提示</button>
+    <button data-demo="stopped" data-i18n>停下后问原因</button>
     <button data-demo="dock" data-i18n>贴边步骤</button>
     <button data-demo="theme" data-i18n>切换深浅</button>
   </nav>

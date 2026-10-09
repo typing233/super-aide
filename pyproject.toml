@@ -64,6 +64,15 @@ packages = ["src/super_aide"]
 # 发版时生成的文件（被 .gitignore 忽略，但要打进包里）：依赖的确切版本、仓库地址
 artifacts = ["src/super_aide/_release/*"]
 
+# 源码包：自我改进时，工作台由"正在运行的版本"加上这些文件生成（不用联网，和运行中的版本完全一致）
+[tool.hatch.build.targets.wheel.force-include]
+"pyproject.toml" = "super_aide/_source/pyproject.toml"
+"README.md" = "super_aide/_source/README.md"
+"README.en.md" = "super_aide/_source/README.en.md"
+"LICENSE" = "super_aide/_source/LICENSE"
+"docs/design.md" = "super_aide/_source/docs/design.md"
+"tests" = "super_aide/_source/tests"
+
 [tool.hatch.build.targets.sdist]
 exclude = ["/spikes", "/installer/out", "/.github"]
 # 打包时先打 sdist、再从 sdist 打 wheel：sdist 里也要带上发版时生成的文件，不然 wheel 里就没有了

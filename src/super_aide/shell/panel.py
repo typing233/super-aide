@@ -31,6 +31,7 @@ class Bridge(QObject):
     followed_up = Signal(str, str)
     continued = Signal(str, str)  # 输入框里 Ctrl+Enter：带着这次的画面接着上次的对话问
     rated = Signal(int)  # 卡片上的 👍（1）/ 👎（-1）
+    reasoned = Signal(str, str, str)  # 你给的原因：(stop | bad, 选项, 补充的话)，交给自我改进
     cancelled = Signal()
     sized = Signal(int, int)
     view_changed = Signal(str)
@@ -56,6 +57,10 @@ class Bridge(QObject):
     @Slot(int)
     def feedback(self, value: int) -> None:
         self.rated.emit(value)
+
+    @Slot(str, str, str)
+    def reason(self, kind: str, choice: str, text: str) -> None:
+        self.reasoned.emit(kind, choice, text)
 
     @Slot()
     def cancel(self) -> None:

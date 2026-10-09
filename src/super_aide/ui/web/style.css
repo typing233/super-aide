@@ -597,3 +597,58 @@ body.preview #root { display: block; width: fit-content; margin: 80px auto 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* ---------- 原因（交给自我改进）：按 Esc 停下后、点 👎 后 ---------- */
+
+.reasons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.reasons[hidden] { display: none; }
+.toast .reasons { margin-top: 10px; }
+
+.reasons-q { color: var(--text-2); margin-right: 2px; }
+
+.reason-chip {
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-2);
+  background: var(--hover);
+  transition: color 150ms, background 150ms;
+}
+
+.reason-chip:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--a) 16%, transparent);
+}
+
+.reason-input {
+  flex: 1 1 140px;
+  min-width: 120px;
+  padding: 4px 2px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.reason-input:focus { border-bottom-color: color-mix(in srgb, var(--a) 50%, transparent); }
+
+.reasons .thanks { color: var(--text-2); }
+
+/* 按 Esc 停下的结果提示：中性的方块，不是红色的"出错" */
+.toast.stopped .check {
+  color: var(--text-2);
+  background: var(--hover);
+}
+
+.toast.stopped .check path { d: path("M7.2 7.2h5.6v5.6H7.2z"); }
+
+.toast.stopped { width: 380px; }

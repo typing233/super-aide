@@ -110,6 +110,43 @@
             <button class="text-btn" id="update-btn">检查更新</button>
           </div>
         </div>
+
+        <h2 id="evolve-section" data-i18n>高级</h2>
+        <div class="tile">
+          <div class="row">
+            <div class="label"><span data-i18n>自我改进</span><small id="evolve-note"></small></div>
+            <button class="switch" id="evolve-switch" role="switch" aria-label="自我改进" data-i18n-aria-label="自我改进"></button>
+          </div>
+          <div class="row evolve-now" id="evolve-now" hidden>
+            <span class="evolve-dot" aria-hidden="true"></span>
+            <div class="label"><span id="evolve-now-title"></span><small id="evolve-now-note"></small></div>
+            <span class="evolve-time" id="evolve-now-time"></span>
+          </div>
+          <div class="row stacked">
+            <div class="label"><span data-i18n>想让助手哪里做得更好？</span><small id="suggest-note"></small></div>
+            <textarea id="suggest-input" rows="3" spellcheck="false"
+                      placeholder="比如：回答再短一点；操作浏览器之前先确认当前网址" data-i18n-placeholder="比如：回答再短一点；操作浏览器之前先确认当前网址"></textarea>
+            <div class="suggest-foot"><button class="text-btn accent" id="suggest-send" data-i18n>提交</button></div>
+          </div>
+          <div class="evolve-list" id="evolve-list"></div>
+        </div>
+        <div class="tile gap">
+          <div class="row">
+            <div class="label"><span id="contribute-title"></span><small id="contribute-note"></small></div>
+            <button class="switch" id="contribute-switch" role="switch" aria-label="社区共建" data-i18n-aria-label="社区共建"></button>
+          </div>
+          <div class="row login-row" id="login-row" hidden>
+            <div class="label"><span id="login-text"></span><small id="login-note"></small></div>
+            <button class="text-btn" id="login-copy" data-i18n>复制</button>
+            <button class="text-btn accent" id="login-open" data-i18n>打开</button>
+            <button class="text-btn" id="login-cancel" data-i18n>取消</button>
+          </div>
+        </div>
+        <div class="section-head" id="community-head" hidden>
+          <h2 id="community-title"></h2>
+          <button class="text-btn" id="community-check" data-i18n>检查</button>
+        </div>
+        <div class="tile" id="community-tile" hidden><div id="community-list"></div></div>
       </div>
 
       <footer class="foot">

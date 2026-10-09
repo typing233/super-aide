@@ -1,8 +1,10 @@
-"""入口：单实例、前置检查（准备窗口）、托盘、全局快捷键、引擎预热、模型发现，以及设置的实时生效。"""
+"""入口：单实例、前置检查（准备窗口）、托盘、全局快捷键、引擎预热、模型发现、自我改进，以及设置的实时生效。"""
 
 from __future__ import annotations
 
 import ctypes
+import hashlib
+import json
 import logging
 import shutil
 import subprocess
@@ -16,6 +18,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from . import __version__, autostart, config, history, hotkeys, i18n, paths, update
 from .engines import prompts
 from .engines.hub import EngineHub
+from .evolve.manager import EvolveManager, wait_for_apply, write_health
 from .i18n import app_name, tr
 from .router import EngineRouter
 from .setup import detect, flow
@@ -73,17 +76,61 @@ def _hide_child_consoles() -> None:
     subprocess.Popen.__init__ = init
 
 
+SYNCED = ".synced.json"
+#: 你点了"生效"或"撤销"后，生效的小程序重启我们时带的参数：--evolved <编号> 等
+EVOLVE_FLAGS = ("--evolved", "--evolve-failed", "--evolve-undone")
+
+
+def _digest(path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _sync_workspace() -> None:
-    """把仓库里的扩展包模板（共享指令、技能）同步到 ~/.super_aide/workspace。"""
+    """把包里的扩展包模板（共享指令、技能）同步到 ~/.super_aide/workspace。
+
+    记下每个文件上次同步过去的内容：你没改过的文件跟着模板走（升级、自我改进、撤销回旧版本都一样；
+    只看时间先后的话，撤销后新内容会一直留着）；你自己改过的不覆盖。还没有记录的文件照旧：模板更新了就覆盖。
+    """
     src = paths.WORKSPACE_TEMPLATE
     if not src.exists():
         return
+    record = paths.WORKSPACE / SYNCED
+    try:
+        synced = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        synced = {}
+    changed = False
     for path in src.rglob("*"):
-        if path.is_file():
-            target = paths.WORKSPACE / path.relative_to(src)
-            if not target.exists() or path.stat().st_mtime > target.stat().st_mtime:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, target)
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(src).as_posix()
+        target = paths.WORKSPACE / rel
+        new = _digest(path)
+        if target.exists():
+            current = _digest(target)
+            if current == new:
+                changed |= synced.get(rel) != new
+                synced[rel] = new
+                continue
+            known = synced.get(rel)
+            if known is None and path.stat().st_mtime <= target.stat().st_mtime:
+                continue
+            if known is not None and current != known:
+                continue  # 你改过
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        synced[rel], changed = new, True
+    if changed:
+        try:
+            record.write_text(json.dumps(synced, ensure_ascii=False, indent=1), encoding="utf-8")
+        except OSError as e:
+            log.warning("记录扩展包的同步状态失败：%s", e)
+
+
+def _flag(name: str) -> str:
+    """命令行里 --evolved <编号> 这样的参数。"""
+    args = sys.argv
+    return args[args.index(name) + 1] if name in args and args.index(name) + 1 < len(args) else ""
 
 
 def _single_instance() -> bool:
@@ -148,7 +195,8 @@ class SuperAide:
         self.ctrl = Controller(cfg, self.collector, self.hub)
         self.hotkeys = hotkeys.HotkeyManager(self.ctrl.on_hotkey)
         app.installNativeEventFilter(self.hotkeys)
-        self.tray = Tray(self.ctrl, app, cfg, self.open_settings, self.open_history)
+        self.tray = Tray(self.ctrl, app, cfg, self.open_settings, self.open_history,
+                         lambda: self.open_settings("evolve"))
         self.settings: SettingsWindow | None = None  # 第一次打开时再创建
         self.history: HistoryWindow | None = None
         self.setup: SetupWindow | None = None
@@ -156,6 +204,14 @@ class SuperAide:
         self.fresh: dict[str, str] = {}
         self.warm_pending = False  # 设置里改了模型：关窗口时再预热，免得每拨一下开关都预热一次
         self.hub.models_found.connect(self._on_models_found)
+        # 自我改进：没办好的时候分析、改进自己的代码；改好后通知你，你点"生效"才换包重启
+        self.evolve = EvolveManager(cfg, self.hub, self.router, quit_app=app.quit, idle_ui=self._idle_ui)
+        self.hub.evolve = self.evolve
+        self.ctrl.on_use = self.evolve.touched
+        self.evolve.changed.connect(self._evolve_changed)
+        self.evolve.notify.connect(self._evolve_notice)
+        self.tray.messageClicked.connect(self._notice_clicked)
+        self._notice_target = ""  # 最近一条系统通知是谁发的：自我改进的通知点开就到设置里那一条
 
     def start(self, announce: bool = False, updated: bool = False) -> None:
         failed = self._register_hotkeys(self.cfg)
@@ -170,6 +226,7 @@ class SuperAide:
             log.warning("更新开机自启的命令失败：%s", e)
         self.hub.warm_up()
         self.hub.discover_models()
+        self.evolve.start(*(_flag(name) for name in EVOLVE_FLAGS))
         threading.Thread(target=self._prune_sessions, name="prune", daemon=True).start()
         log.info("Super Aide 已启动：%s 问答 / %s 操作", self.cfg.hotkey_ask, self.cfg.hotkey_act)
 
@@ -179,6 +236,7 @@ class SuperAide:
             title = tr("{app}已更新到 {version}", app=app_name(), version=__version__)
         else:
             title = tr("{app}已经在运行", app=app_name()) if again else tr("{app}已在后台运行", app=app_name())
+        self._notice_target = ""
         self.tray.showMessage(title, tr("按 {ask} 问答，{act} 操作。右键托盘图标可以打开设置。",
                                         ask=self.cfg.hotkey_ask, act=self.cfg.hotkey_act),
                               QSystemTrayIcon.Information, 6000)
@@ -211,6 +269,26 @@ class SuperAide:
             self.history = HistoryWindow(self.ctrl.theme)
         self.history.open()
 
+    # ---------- 自我改进 ----------
+
+    def _idle_ui(self) -> bool:
+        """回答界面收着，设置、历史、准备窗口都没开着。"""
+        windows = (self.settings, self.history, self.setup)
+        return self.ctrl.view is None and not any(w is not None and w.isVisible() for w in windows)
+
+    def _evolve_changed(self, state: dict) -> None:
+        self.tray.set_evolve(state)
+        if self.settings is not None:
+            self.settings.evolve_changed(state)
+
+    def _evolve_notice(self, title: str, body: str) -> None:
+        self._notice_target = "evolve"
+        self.tray.showMessage(title, body, QSystemTrayIcon.Information, 10000)
+
+    def _notice_clicked(self) -> None:
+        if self._notice_target == "evolve":
+            self.open_settings("evolve")
+
     # ---------- 快捷键 ----------
 
     def _register_hotkeys(self, cfg: config.Config) -> list[str]:
@@ -241,10 +319,10 @@ class SuperAide:
 
     # ---------- 设置 ----------
 
-    def open_settings(self) -> None:
+    def open_settings(self, section: str = "") -> None:
         if self.settings is None:
             self.settings = SettingsWindow(self)
-        self.settings.open()
+        self.settings.open(section)
 
     def resolved_theme(self) -> str:
         return self.ctrl.theme()
@@ -261,12 +339,15 @@ class SuperAide:
                 self._register_hotkeys(old)
         routing_changed = _routing(new) != _routing(old)
         language_changed = new.language != old.language
+        evolve_changed = (new.evolve_enabled, new.evolve_contribute) != (old.evolve_enabled, old.evolve_contribute)
         old.update_from(new)
         self.collector.blocked = {a.lower() for a in old.blocked_apps}
         if routing_changed:
             self.hub.reconfigure()
             self.warm_pending = True
         config.save(old)
+        if evolve_changed:
+            self.evolve.set_enabled(old.evolve_enabled)
         if language_changed:
             self.apply_language()
         self.tray.refresh(old)
@@ -295,6 +376,7 @@ class SuperAide:
         self.hub.discover_models()
 
     def _on_models_found(self, result: dict) -> None:
+        self.evolve.models_found(result["found"])  # 自我改进看服务到底提供哪些模型（有没有 Opus 5.5）
         added, fitted = 0, False
         for name, ids in result["found"].items():
             engine = self.cfg.engine(name)
@@ -369,11 +451,13 @@ class Startup:
                                              f"{'' if t.configured or not t.installed else '没配模型'}"
                                              for t in (report.claude, report.codex, report.dsh)))
             self.window = SetupWindow(self.cfg, report, first_run=True, on_done=self._done, on_quit=self.app.quit)
+            write_health()  # 你点了"生效"、超级助手重启时：告诉生效的小程序新版本起来了
             return
         if not self.cfg.setup_done:
             self.cfg.setup_done = True  # 本来就都装好、配好了
             config.save(self.cfg)
         self._launch(report)
+        write_health()
 
     def _done(self, result: SetupResult) -> None:
         apply_choices(self.cfg, result)
@@ -384,19 +468,22 @@ class Startup:
         if result is not None:
             self.aide.adopt_setup(self.window, result)
         self.app.aboutToQuit.connect(self.aide.shutdown)
-        # 刚准备完也提示：告诉你怎么用。安装器更新完重新打开时带 --updated
-        self.aide.start(announce=result is not None or not self.quiet, updated="--updated" in sys.argv)
+        # 刚准备完也提示：告诉你怎么用。安装器更新完重新打开时带 --updated；自我改进生效后重启时由它自己提示
+        evolving = any(flag in sys.argv for flag in EVOLVE_FLAGS)
+        self.aide.start(announce=(result is not None or not self.quiet) and not evolving,
+                        updated="--updated" in sys.argv)
 
 
 def main() -> int:
     paths.ensure()
     _setup_logging()
     _hide_child_consoles()
-    _sync_workspace()
+    wait_for_apply()  # 你点了"生效"、正在换包：等它换完再启动（它自己重启我们时不用等）
     if not _single_instance():
         log.info("已经在运行了")
         _wake_running()
         return 0
+    _sync_workspace()  # 放在单实例检查之后：已经有一个在运行时，不动它正在用的扩展包
     cfg = config.load()
     i18n.set_language(i18n.resolve(cfg.language))
 

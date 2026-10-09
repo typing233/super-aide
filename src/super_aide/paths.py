@@ -12,6 +12,8 @@ WORKSPACE = HOME / "workspace"
 PLUGIN = WORKSPACE / "plugin"
 ROUTER = HOME / "router"
 LOGS = HOME / "logs"
+#: 自我改进：任务、工作台（正在运行的版本的源码）、测试环境、打好的包
+EVOLVE = HOME / "evolve"
 SYSTEM_PROFILE = HOME / "system_profile.json"
 
 PACKAGE = Path(__file__).resolve().parent

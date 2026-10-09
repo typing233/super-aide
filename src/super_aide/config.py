@@ -75,6 +75,10 @@ class Config:
         enabled=False, models=[ModelEntry(m, True, "max") for m in DSH_MODELS]))
     #: 准备窗口（前置检查）走完过一次。之后只有一个能用的引擎都没有时才会自动打开
     setup_done: bool = False
+    #: 自我改进：任务失败、你停下并说明原因、点 👎 或提建议时，分析并改进自己的代码，检查通过后自动更新
+    evolve_enabled: bool = True
+    #: 社区共建：稳定的改进以你的 GitHub 账号自动提交 PR 到主版本。auto = 能推送主仓库（维护者）时打开，否则关闭
+    evolve_contribute: str = "auto"  # auto | on | off
 
     def engine(self, name: str) -> EngineSettings:
         return {"claude": self.claude, "codex": self.codex, "dsh": self.dsh}[name]
@@ -92,6 +96,10 @@ def _engine_from(data: dict, default: EngineSettings) -> EngineSettings:
                          max_effort=str(m.get("max_effort", "max")))
               for m in data.get("models", []) if m.get("id")]
     return EngineSettings(enabled=bool(data.get("enabled", default.enabled)), models=models or default.models)
+
+
+def _choice(value, allowed: tuple[str, ...], default: str) -> str:
+    return value if value in allowed else default
 
 
 def from_dict(data: dict) -> Config:
@@ -116,6 +124,8 @@ def from_dict(data: dict) -> Config:
         codex=_engine_from(engines.get("codex", {}), d.codex),
         dsh=_engine_from(engines.get("dsh", {}), d.dsh),
         setup_done=bool(data.get("setup", {}).get("done", d.setup_done)),
+        evolve_enabled=bool(data.get("evolve", {}).get("enabled", d.evolve_enabled)),
+        evolve_contribute=_choice(data.get("evolve", {}).get("contribute"), ("auto", "on", "off"), d.evolve_contribute),
     )
 
 
@@ -132,6 +142,7 @@ def to_dict(cfg: Config) -> dict:
             for name, eng in (("claude", cfg.claude), ("codex", cfg.codex), ("dsh", cfg.dsh))
         },
         "setup": {"done": cfg.setup_done},
+        "evolve": {"enabled": cfg.evolve_enabled, "contribute": cfg.evolve_contribute},
     }
 
 

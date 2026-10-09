@@ -26,7 +26,9 @@ RELEASE_DIR = Path(__file__).resolve().parent / "_release"
 INSTALLER = "SuperAideSetup.exe"
 MIRROR = "https://mirrors.aliyun.com/pypi/simple"
 TIMEOUT = 8
-_VERSION = re.compile(r"^v?(\d+(?:\.\d+)*)$")
+#: 自我改进装上的本地版本带 "+aide.N"（PEP 440 的本地版本号）：比较时只看前面的官方版本
+_VERSION = re.compile(r"^v?(\d+(?:\.\d+)*)(?:\+[0-9A-Za-z.]+)?$")
+_LOCAL = re.compile(r"\+aide\.(\d+)$")
 _WHEEL = re.compile(r"super_aide-(\d+(?:\.\d+)*)-py3-none-any\.whl")
 
 
@@ -67,9 +69,20 @@ def release_info() -> dict:
 
 
 def parse(version: str) -> tuple[int, ...] | None:
-    """"0.2.0" / "v0.2.0" → (0, 2, 0)。预发布版（0.2.0rc1 之类）不认：只提示正式版。"""
+    """"0.2.0" / "v0.2.0" / "0.2.0+aide.3" → (0, 2, 0)。预发布版（0.2.0rc1 之类）不认：只提示正式版。"""
     m = _VERSION.match(version.strip())
     return tuple(int(x) for x in m.group(1).split(".")) if m else None
+
+
+def base_version(version: str) -> str:
+    """"0.2.0+aide.3" → "0.2.0"：自我改进前的官方版本。"""
+    return version.split("+", 1)[0]
+
+
+def evolved_count(version: str) -> int:
+    """在官方版本上自我改进了几次（"0.2.0+aide.3" → 3）。"""
+    m = _LOCAL.search(version)
+    return int(m.group(1)) if m else 0
 
 
 def is_newer(latest: str, current: str) -> bool:

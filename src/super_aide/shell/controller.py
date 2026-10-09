@@ -83,6 +83,7 @@ class Controller(QObject):
         self.t_hotkey: float | None = None
         self.ready = False
         self._clip = ("", 0.0)
+        self.on_use = lambda: None  # 你在用助手（召唤、提问）：自我改进挑你空下来的时候做事
 
         b = self.bridge
         b.readied.connect(self._warm_panel)
@@ -93,6 +94,7 @@ class Controller(QObject):
         b.followed_up.connect(self._on_followup)
         b.continued.connect(self._on_continue)
         b.rated.connect(lambda value: self.hub.feedback(self.conv_key, value > 0))
+        b.reasoned.connect(lambda kind, choice, text: self.hub.reason(self.conv_key, kind, choice, text))
         b.shown_on_screen.connect(self._on_shown)
         b.dock_expanded.connect(self._expand_dock)
         self.overlay.reselected.connect(self._on_reselected)
@@ -203,6 +205,7 @@ class Controller(QObject):
     def summon(self, mode: str, arrived: float | None = None) -> None:
         if not self.ready:
             return
+        self.on_use()
         self.signals.clear_guide()
         self.t_hotkey = arrived or time.perf_counter()
         marks: list[tuple[str, float]] = []
@@ -283,6 +286,7 @@ class Controller(QObject):
         if self.snap is None:
             return
         snap = self.snap
+        self.on_use()
         self.conv_key, self.conv_mode, self.conv_time = snap.id, mode, time.time()
         self.last_question, self.answer = text, ""
         self.hub.ask(snap.id, mode, text, snap, self._task(mode, text, snap))
@@ -305,6 +309,7 @@ class Controller(QObject):
         self._ask_more(text, mode, self.collector.start(cap))
 
     def _ask_more(self, text: str, mode: str, snap: Snapshot) -> None:
+        self.on_use()
         if mode == self.conv_mode and NEGATIVE_FOLLOWUP.search(text):
             self.hub.feedback(self.conv_key, False, "negative_followup")  # "不对""没用"：上一轮没答好
         if mode != self.conv_mode:

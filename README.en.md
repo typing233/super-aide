@@ -10,6 +10,7 @@ Under the hood it drives **Claude Code** and **Codex** (or **DeepSeek Harness** 
 - **Act** (default `Alt+W`): it does the work — command line, files, desktop apps, web pages — then reports the result and how to undo it. Press `Esc` any time to stop.
 - **Sees everything**: the exact text of every window at the moment you ask (including scrolled-out parts), screenshots, and the area you selected.
 - **Learns**: success first; a faster or cheaper setup is only used once it's proven just as good. Pitfalls it hit before come back to mind in similar situations.
+- **Improves itself**: when a task fails, you stop it with Esc and say it got something wrong, you click 👎, or you leave a suggestion in Settings, it uses Claude Code (Opus 5.5 · max) to find the cause and improve its own code; once tests and an independent review pass, you confirm before it applies. If you like, stable improvements can be contributed upstream under your GitHub account.
 - **English / 中文**: the UI follows your Windows language and can be switched in Settings; it answers in the language you ask in.
 
 ## Install
@@ -50,6 +51,15 @@ A custom endpoint is written into each tool's own config (with a `*.super-aide.b
 - `Alt+Q` to ask, `Alt+W` to act (changeable in Settings). The input box only appears when you press a hotkey.
 - **Settings**: hotkeys, theme, **language** (follow system / 中文 / English), apps it never looks at, which models each engine may use, autostart.
 - **Updates**: Settings → General → Version. It checks when you open Settings; click Update and Super Aide quits, the installer installs the new version and reopens it. Settings and history are kept.
+
+## Self-improvement
+
+- **When**: a task fails (network or sign-in problems don't count); you press `Esc` during an action and say what the assistant got wrong (no answer means it wasn't its fault); you click 👎; or you write a suggestion in **Settings → Advanced**.
+- **How**: it first checks whether this is a defect it can fix itself. If so, it changes the code in a working copy, adds tests, runs the whole test suite itself, then has a separate session review the change. By default it uses Claude Code + Opus 5.5 (maximum effort); if that isn't available, it uses the best tool and model on your PC.
+- **You apply it**: you get a notification when it's ready; open it to see what changed, then click Apply to switch to the new version (Super Aide restarts in a few seconds). If the new version doesn't start, the previous one is restored automatically, and you can undo the latest improvement at any time. The version becomes something like `0.2.0+aide.1`; official updates still show up, and afterwards your local improvements are carried over to the new version (again with your confirmation).
+- **Meanwhile**: it reminds you to keep your PC on and online, and you can keep using it. Progress shows in the first line of the tray menu and in Settings. It resumes after network drops and restarts. One improvement at a time; later ones queue and first check whether an earlier improvement already fixed them.
+- **Community contributions** (optional): Settings → Advanced → Contribute to the community, then sign in with GitHub once. Improvements that run stably for a day are submitted as pull requests under your account — code changes only, no screen content or logs; anything that looks like personal info isn't submitted automatically. The maintainer reviews before merging; see [CONTRIBUTING.md](CONTRIBUTING.md).
+- Self-improvement data lives in `~/.super_aide/evolve/`: jobs, the working copy, built packages. The conversation and logs used for analysis go only to the model service you configured and are deleted when the job ends; only the conclusion and the patch are kept.
 
 ## Privacy
 

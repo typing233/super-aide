@@ -54,6 +54,7 @@ def aide(monkeypatch):
     a.collector = SimpleNamespace(blocked=set())
     a.hub = Recorder()
     a.tray = Recorder()
+    a.evolve = Recorder()
     a.ctrl = SimpleNamespace(panel=Recorder(), theme=lambda: "dark")
     a.settings = None
     a.warm_pending = False
@@ -133,7 +134,8 @@ def test_discovered_models_merged_disabled(aide):
 
 def test_bridge_save_and_load(monkeypatch):
     monkeypatch.setattr(settings_ui.autostart, "is_enabled", lambda: False)
-    host = SimpleNamespace(cfg=config.Config(), applied=[], resolved_theme=lambda: "light")
+    host = SimpleNamespace(cfg=config.Config(), applied=[], resolved_theme=lambda: "light",
+                           evolve=SimpleNamespace(snapshot=lambda: {"enabled": True, "items": []}))
     host.apply_settings = lambda new: host.applied.append(new) or []
     bridge = settings_ui.SettingsBridge(host, window=None)
 
