@@ -6,6 +6,9 @@ on:
     branches: [main, master]
   pull_request:
 
+env:
+  PYTHONIOENCODING: utf-8   # Windows 机器的输出编码是 cp1252：不设的话，打印中文（比如测试失败的说明）会出错
+
 jobs:
   test:
     runs-on: windows-latest

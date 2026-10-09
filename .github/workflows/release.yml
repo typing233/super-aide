@@ -15,6 +15,9 @@ on:
 permissions:
   contents: read
 
+env:
+  PYTHONIOENCODING: utf-8   # Windows 机器的输出编码是 cp1252：不设的话，打印中文（比如测试失败的说明）会出错
+
 jobs:
   build:
     runs-on: windows-latest
@@ -46,7 +49,7 @@ jobs:
       - name: 校验和
         shell: pwsh
         run: |
-          Get-FileHash dist/*, installer-dist/SuperAideSetup.exe -Algorithm SHA256 |
+          Get-FileHash dist/*.whl, dist/*.tar.gz, installer-dist/SuperAideSetup.exe -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
             Set-Content installer-dist/SHA256SUMS.txt
 

@@ -25,6 +25,8 @@ OUT = ROOT / "src" / "super_aide" / "_release"
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")  # GitHub Actions 的 Windows 机器输出编码是 cp1252，打印中文会出错
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repo", default="", help="GitHub 仓库，例如 someone/super_aide")
     parser.add_argument("--tag", default="", help="发版的标签，例如 v0.2.0")
