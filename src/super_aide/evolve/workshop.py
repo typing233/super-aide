@@ -30,7 +30,7 @@ from . import patching, wheelfile
 log = logging.getLogger(__name__)
 
 KIT = "_source"
-KIT_FILES = ("pyproject.toml", "README.md", "README.en.md", "LICENSE", "docs/design.md")
+KIT_FILES = ("pyproject.toml", "README.md", "README.zh-CN.md", "LICENSE", "docs/design.md")
 KIT_DIRS = ("tests",)
 META = ".aide.json"
 SDIST_INDEXES = ("https://mirrors.aliyun.com/pypi/simple", "https://pypi.tuna.tsinghua.edu.cn/simple")

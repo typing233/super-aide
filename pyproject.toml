@@ -43,7 +43,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/typing233/super-aide"
+Homepage = "https://typing233.github.io/super-aide/"
 Repository = "https://github.com/typing233/super-aide"
 Issues = "https://github.com/typing233/super-aide/issues"
 Releases = "https://github.com/typing233/super-aide/releases"
@@ -68,12 +68,12 @@ artifacts = ["src/super_aide/_release/*"]
 [tool.hatch.build.targets.wheel.force-include]
 "pyproject.toml" = "super_aide/_source/pyproject.toml"
 "README.md" = "super_aide/_source/README.md"
-"README.en.md" = "super_aide/_source/README.en.md"
+"README.zh-CN.md" = "super_aide/_source/README.zh-CN.md"
 "LICENSE" = "super_aide/_source/LICENSE"
 "docs/design.md" = "super_aide/_source/docs/design.md"
 "tests" = "super_aide/_source/tests"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/spikes", "/installer/out", "/.github"]
+exclude = ["/spikes", "/installer/out", "/.github", "/website", "/video"]
 # 打包时先打 sdist、再从 sdist 打 wheel：sdist 里也要带上发版时生成的文件，不然 wheel 里就没有了
 artifacts = ["src/super_aide/_release/*"]

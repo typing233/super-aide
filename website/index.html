@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Super Aide — the Windows assistant that sees your screen</title>
+  <meta name="description" content="Press a hotkey and say one sentence: Super Aide reads what's on your screen and answers, or does the work for you. Free and open source, powered by Claude Code and Codex.">
+  <link rel="canonical" href="https://typing233.github.io/super-aide/">
+  <link rel="alternate" hreflang="en" href="https://typing233.github.io/super-aide/?lang=en">
+  <link rel="alternate" hreflang="zh-CN" href="https://typing233.github.io/super-aide/?lang=zh">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Super Aide — the Windows assistant that sees your screen">
+  <meta property="og:description" content="Press a key. Say one thing. Done. Free and open source, powered by Claude Code and Codex.">
+  <meta property="og:url" content="https://typing233.github.io/super-aide/">
+  <meta property="og:image" content="https://typing233.github.io/super-aide/assets/og-en.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#07080B" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FBFBFD" media="(prefers-color-scheme: light)">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/icon-64.png" sizes="64x64" type="image/png">
+  <link rel="apple-touch-icon" href="assets/icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // 先定语言再画页面：网址 ?lang= → 上次的选择 → 浏览器语言
+    (function () {
+      var q = new URLSearchParams(location.search).get("lang"), saved = null;
+      try { saved = localStorage.getItem("lang"); } catch (e) {}
+      var nav = (navigator.languages && navigator.languages[0]) || navigator.language || "en";
+      var lang = /^zh/i.test(q || saved || nav) ? "zh" : "en";
+      var root = document.documentElement;
+      root.dataset.lang = lang;
+      root.lang = lang === "zh" ? "zh-CN" : "en";
+      // 有脚本时内容滚动到才浮现；main.js 万一没加载上，2.5 秒后照常全部显示
+      root.classList.add("js");
+      window.__revealFallback = setTimeout(function () { root.classList.remove("js"); }, 2500);
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main"><span lang="en">Skip to content</span><span lang="zh-CN">跳到正文</span></a>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="#top" aria-label="Super Aide">
+        <span class="orb" aria-hidden="true"></span>
+        <span lang="en">Super Aide</span><span lang="zh-CN">超级助手</span>
+      </a>
+      <nav class="links" aria-label="Sections">
+        <a href="#features"><span lang="en">Features</span><span lang="zh-CN">功能</span></a>
+        <a href="#start"><span lang="en">Get started</span><span lang="zh-CN">开始使用</span></a>
+        <a href="#faq"><span lang="en">FAQ</span><span lang="zh-CN">常见问题</span></a>
+      </nav>
+      <div class="nav-actions">
+        <a class="icon-btn" href="https://github.com/typing233/super-aide" aria-label="GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+        <button class="lang-btn" type="button" data-toggle-lang aria-label="Switch language / 切换语言">
+          <span lang="en">中文</span><span lang="zh-CN">EN</span>
+        </button>
+        <a class="btn btn-sm" data-download href="https://github.com/typing233/super-aide/releases/latest/download/SuperAideSetup.exe">
+          <span lang="en">Download</span><span lang="zh-CN">下载</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ① 首屏 -->
+    <section class="hero" id="top">
+      <div class="glow" aria-hidden="true"></div>
+      <a class="badge reveal" href="https://github.com/typing233/super-aide/releases/latest">
+        <span class="dot" aria-hidden="true"></span>
+        <span data-version>v0.2.0</span>
+        <span class="sep" aria-hidden="true">·</span>
+        <span lang="en">Free and open source</span><span lang="zh-CN">免费开源</span>
+      </a>
+      <h1 class="reveal">
+        <span lang="en"><span class="ph">Press a key.</span> <span class="ph">Say one thing.</span><br><em class="grad">Done.</em></span>
+        <span lang="zh-CN"><span class="ph">按一个键，</span><span class="ph">说一句话，</span><br><em class="grad">就办好。</em></span>
+      </h1>
+      <p class="lead reveal">
+        <span lang="en">Super Aide is a Windows assistant that sees your screen. Ask about anything on it — or let it do the work. Powered by Claude Code and Codex.</span>
+        <span lang="zh-CN">超级助手是一个看得见屏幕的 Windows 助手：屏幕上的东西直接问，或者让它直接动手。背后是 Claude Code 和 Codex。</span>
+      </p>
+      <div class="cta reveal">
+        <a class="btn btn-primary btn-lg" data-download href="https://github.com/typing233/super-aide/releases/latest/download/SuperAideSetup.exe">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14"/></svg>
+          <span lang="en">Download for Windows</span><span lang="zh-CN">下载 Windows 版</span>
+        </a>
+        <a class="btn btn-ghost btn-lg" href="#film" data-play-film>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z"/></svg>
+          <span lang="en">Watch the film</span><span lang="zh-CN">看宣传片</span>
+          <span class="muted">1:00</span>
+        </a>
+      </div>
+      <p class="fine reveal">
+        <span lang="en">Windows 10 / 11 · 64-bit · <span data-size>101 KB</span> installer</span>
+        <span lang="zh-CN">Windows 10 / 11 · 64 位 · 安装器 <span data-size>101 KB</span></span>
+        <span class="sep" aria-hidden="true">·</span>
+        <a href="https://github.com/typing233/super-aide/releases"><span lang="en">All releases</span><span lang="zh-CN">所有版本</span></a>
+      </p>
+
+      <div class="stage reveal" id="film">
+        <video id="film-video" playsinline muted loop preload="none" data-en="assets/film-en.mp4" data-zh="assets/film-zh.mp4" data-poster-en="assets/film-en.jpg" data-poster-zh="assets/film-zh.jpg" poster="assets/film-en.jpg" aria-label="Super Aide promo film"></video>
+        <button class="sound-btn" type="button" data-sound>
+          <svg class="i-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4zM16 9.5l5 5M21 9.5l-5 5"/></svg>
+          <svg class="i-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>
+          <span class="label-off"><span lang="en">Watch with sound</span><span lang="zh-CN">打开声音从头看</span></span>
+          <span class="label-on"><span lang="en">Mute</span><span lang="zh-CN">静音</span></span>
+        </button>
+      </div>
+
+      <ul class="engines reveal" aria-label="Engines">
+        <li><span lang="en">Works with</span><span lang="zh-CN">调度</span></li>
+        <li class="chip">Claude Code</li>
+        <li class="chip">Codex</li>
+        <li class="chip">DeepSeek Harness</li>
+      </ul>
+    </section>
+
+    <!-- ② 功能 -->
+    <section class="features" id="features">
+      <article class="feature reveal">
+        <div class="copy">
+          <p class="eyebrow ask"><span lang="en">Sees what you see</span><span lang="zh-CN">看得见你的屏幕</span></p>
+          <h2><span lang="en">Stop describing your screen.</span><span lang="zh-CN">不用再给 AI 描述屏幕。</span></h2>
+          <p lang="en">The moment you ask, Super Aide reads the exact text of every open window — even the parts scrolled out of view — together with a screenshot and any area you select. No more pasting context.</p>
+          <p lang="zh-CN">提问的那一刻，它把每个窗口的文字逐字读下来——连滚动出去的部分也在——再加上截图和你框选的区域。不用再复制粘贴背景。</p>
+          <ul class="points">
+            <li><span lang="en">Exact text, not guesses from a picture</span><span lang="zh-CN">逐字的文字，不靠看图猜</span></li>
+            <li><span lang="en">Apps you never want it to see — password managers by default — are blacked out</span><span lang="zh-CN">不想让它看的应用（默认是密码管理器）截图里涂黑、不读文字</span></li>
+          </ul>
+        </div>
+        <figure class="shot"><img data-shot="see" width="1600" height="900" loading="lazy" decoding="async" alt=""></figure>
+      </article>
+
+      <article class="feature reveal">
+        <div class="copy">
+          <p class="eyebrow ask"><kbd>Alt</kbd><kbd>Q</kbd> <span lang="en">Ask</span><span lang="zh-CN">问答</span></p>
+          <h2><span lang="en">Ask about anything on screen.</span><span lang="zh-CN">屏幕上的东西，直接问。</span></h2>
+          <p lang="en">Press Alt+Q and type one sentence. The answer leads with the conclusion and appears right where you're working. Ask mode is read-only: it can read files and run read-only checks, but never changes your PC.</p>
+          <p lang="zh-CN">按 Alt+Q，说一句话。结论先说，就出现在你正在看的地方。问答模式只读：可以读文件、跑只读的诊断，但不会动你的电脑。</p>
+        </div>
+        <figure class="shot"><img data-shot="ask" width="1600" height="1000" loading="lazy" decoding="async" alt=""></figure>
+      </article>
+
+      <article class="feature reveal">
+        <div class="copy">
+          <p class="eyebrow act"><kbd>Alt</kbd><kbd>W</kbd> <span lang="en">Act</span><span lang="zh-CN">操作</span></p>
+          <h2><span lang="en">Or let it do the work.</span><span lang="zh-CN">或者，让它直接动手。</span></h2>
+          <p lang="en">Press Alt+W and say what you want done. It works across the command line, files, desktop apps and web pages, then tells you what changed and how to undo it. Press Esc to stop it at any time — and keep using your PC while it works.</p>
+          <p lang="zh-CN">按 Alt+W，说要做什么。命令行、文件、桌面软件、网页都能操作，做完告诉你改了什么、怎么撤销。随时按 Esc 停下；它干活的时候，你照常用电脑。</p>
+        </div>
+        <figure class="shot"><img data-shot="act" width="1600" height="1000" loading="lazy" decoding="async" alt=""></figure>
+      </article>
+
+      <article class="feature reveal">
+        <div class="copy">
+          <p class="eyebrow ask"><span lang="en">Step by step</span><span lang="zh-CN">手把手</span></p>
+          <h2><span lang="en">Rather do it yourself? It points the way.</span><span lang="zh-CN">想自己来？它给你指路。</span></h2>
+          <p lang="en">Ask how to do something and it circles exactly where to click, numbered in order, right on your screen. Multi-step answers dock to the edge of the screen so you can follow along.</p>
+          <p lang="zh-CN">问它怎么做，它在屏幕上把要点的地方按顺序圈出来、标上编号。分步骤的回答会贴到屏幕边上，方便边看边做。</p>
+        </div>
+        <figure class="shot"><img data-shot="guide" width="1600" height="1000" loading="lazy" decoding="async" alt=""></figure>
+      </article>
+
+      <article class="feature reveal">
+        <div class="copy">
+          <p class="eyebrow duo">Claude Code + Codex</p>
+          <h2><span lang="en">Two top agents. No model picking.</span><span lang="zh-CN">两个顶尖的助手，不用你挑模型。</span></h2>
+          <p lang="en">Super Aide drives Claude Code and Codex — or DeepSeek Harness — and picks the engine, model and reasoning effort for every request. Success comes first: a faster, cheaper setup is only used once it has proven just as good. Pitfalls it hit before come back to mind in similar situations.</p>
+          <p lang="zh-CN">超级助手调度 Claude Code 和 Codex（也可以用 DeepSeek Harness），每次自动挑引擎、模型和思考强度。先保证办成：更快、更省的配置要先证明一样好才会换上。踩过的坑，遇到相似的情况会想起来。</p>
+        </div>
+        <figure class="shot"><img data-shot="route" width="1720" height="660" loading="lazy" decoding="async" alt=""></figure>
+      </article>
+
+      <article class="feature reveal">
+        <div class="copy">
+          <p class="eyebrow ask"><span lang="en">Self-improving</span><span lang="zh-CN">自我改进</span></p>
+          <h2><span lang="en">When it slips up, it improves itself.</span><span lang="zh-CN">做得不好，它会自己改进。</span></h2>
+          <p lang="en">When a task fails, you stop it and say what went wrong, or you click 👎, it uses Claude Code (Opus 5.5 · max) to find the cause, changes its own code, runs the whole test suite and has a separate session review the change. Nothing changes until you click Apply, and you can undo it any time. If you like, stable improvements can be contributed upstream under your GitHub account.</p>
+          <p lang="zh-CN">任务没办成、你停下并说明原因、或者点了 👎，它会用 Claude Code（Opus 5.5 · 最高思考强度）找原因、改自己的代码、跑全部测试，再另开一个会话复核。你点“生效”才换上，随时可以撤销。愿意的话，稳定的改进还能以你的 GitHub 账号贡献给主版本。</p>
+        </div>
+        <figure class="shot"><img data-shot="evolve" width="1680" height="700" loading="lazy" decoding="async" alt=""></figure>
+      </article>
+    </section>
+
+    <!-- ③ 放心用 -->
+    <section class="trust">
+      <h2 class="section-title reveal"><span lang="en">Built to stay out of your way</span><span lang="zh-CN">用着放心，也不打扰</span></h2>
+      <div class="grid">
+        <div class="tile reveal">
+          <h3><span lang="en">Your models, your keys</span><span lang="zh-CN">用你自己的模型</span></h3>
+          <p lang="en">It runs on Claude Code's and Codex's own configuration: sign in with your account, or point them to your own endpoint.</p>
+          <p lang="zh-CN">直接用 Claude Code、Codex 自己的配置：用账号登录，或者填你自己的服务地址。</p>
+        </div>
+        <div class="tile reveal">
+          <h3><span lang="en">Private by design</span><span lang="zh-CN">隐私</span></h3>
+          <p lang="en">What's on your screen only goes to the model service you configured. Its own data stays in ~/.super_aide on your PC.</p>
+          <p lang="zh-CN">屏幕内容只发给你配置的模型服务；它自己的数据都在你电脑的 ~/.super_aide 里。</p>
+        </div>
+        <div class="tile reveal">
+          <h3><span lang="en">There when you need it</span><span lang="zh-CN">叫了才来</span></h3>
+          <p lang="en">No main window. It appears on a hotkey, needs no background from you, and disappears when it's done.</p>
+          <p lang="zh-CN">没有主窗口：按快捷键才出现，不用你交代背景，用完就消失。</p>
+        </div>
+        <div class="tile reveal">
+          <h3><span lang="en">Open source</span><span lang="zh-CN">开源</span></h3>
+          <p lang="en">MIT licensed. Read the code, open an issue, or let your improvements flow back to everyone.</p>
+          <p lang="zh-CN">MIT 许可证。代码公开，欢迎提问题，也欢迎把改进贡献回来。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ④ 开始使用 -->
+    <section class="start" id="start">
+      <h2 class="section-title reveal"><span lang="en">Up and running in minutes</span><span lang="zh-CN">几分钟就能用上</span></h2>
+      <ol class="steps">
+        <li class="reveal">
+          <span class="n">1</span>
+          <h3><span lang="en">Download the installer</span><span lang="zh-CN">下载安装器</span></h3>
+          <p lang="en">SuperAideSetup.exe is about 100 KB.</p>
+          <p lang="zh-CN">SuperAideSetup.exe 只有约 100 KB。</p>
+        </li>
+        <li class="reveal">
+          <span class="n">2</span>
+          <h3><span lang="en">Run it</span><span lang="zh-CN">双击运行</span></h3>
+          <p lang="en">It sets up the runtime (about 600 MB the first time) and switches to mirrors when the official sources are slow. No admin rights needed.</p>
+          <p lang="zh-CN">它会装好运行环境（第一次约 600 MB），官方源慢时自动换国内镜像。不需要管理员权限。</p>
+        </li>
+        <li class="reveal">
+          <span class="n">3</span>
+          <h3><span lang="en">Connect a model</span><span lang="zh-CN">连上模型</span></h3>
+          <p lang="en">The setup window checks Claude Code and Codex, installs what's missing, and lets you sign in or enter a custom endpoint.</p>
+          <p lang="zh-CN">准备窗口会检查 Claude Code 和 Codex，缺的自动装上，再让你登录账号或者填自定义服务地址。</p>
+        </li>
+      </ol>
+      <div class="cta center reveal">
+        <a class="btn btn-primary btn-lg" data-download href="https://github.com/typing233/super-aide/releases/latest/download/SuperAideSetup.exe">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14"/></svg>
+          <span lang="en">Download for Windows</span><span lang="zh-CN">下载 Windows 版</span>
+        </a>
+      </div>
+      <p class="note reveal">
+        <span lang="en">The installer isn't code-signed yet. If Windows says “Windows protected your PC”, click <b>More info → Run anyway</b>.</span>
+        <span lang="zh-CN">安装器还没有代码签名。Windows 提示“已保护你的电脑”时，点<b>更多信息 → 仍要运行</b>。</span>
+        <span class="mirror" data-mirror hidden>
+          <span lang="en">Download not starting? Try <a data-github-download href="https://github.com/typing233/super-aide/releases/latest">GitHub Releases</a>.</span>
+          <span lang="zh-CN">下载不动？换 <a data-github-download href="https://github.com/typing233/super-aide/releases/latest">GitHub Releases</a> 试试。</span>
+        </span>
+      </p>
+    </section>
+
+    <!-- ⑤ 常见问题 -->
+    <section class="faq" id="faq">
+      <h2 class="section-title reveal"><span lang="en">Questions</span><span lang="zh-CN">常见问题</span></h2>
+      <div class="qa reveal">
+        <details>
+          <summary><span lang="en">Is it free?</span><span lang="zh-CN">要钱吗？</span></summary>
+          <p lang="en">Super Aide itself is free and open source (MIT). It uses your own Claude Code or Codex access — a subscription or an API key — which that provider bills as usual.</p>
+          <p lang="zh-CN">超级助手本身免费开源（MIT）。它用的是你自己的 Claude Code 或 Codex（订阅或 API 密钥），费用照常由对应的服务商收取。</p>
+        </details>
+        <details>
+          <summary><span lang="en">What do I need?</span><span lang="zh-CN">需要什么？</span></summary>
+          <p lang="en">64-bit Windows 10 (1809 or later) or Windows 11, and access to Claude Code or Codex. DeepSeek Harness works as an alternative.</p>
+          <p lang="zh-CN">64 位 Windows 10（1809 以上）或 Windows 11，再加上 Claude Code 或 Codex 的使用权限；也可以用 DeepSeek Harness 替代。</p>
+        </details>
+        <details>
+          <summary><span lang="en">Where does my screen content go?</span><span lang="zh-CN">我的屏幕内容会发到哪？</span></summary>
+          <p lang="en">Only to the model service you configured. Super Aide's own data — settings, history and what it has learned — stays in ~/.super_aide on your PC.</p>
+          <p lang="zh-CN">只发给你配置的模型服务。超级助手自己的数据——设置、记录、学到的经验——都在你电脑的 ~/.super_aide 里。</p>
+        </details>
+        <details>
+          <summary><span lang="en">How careful is Act mode?</span><span lang="zh-CN">操作模式会不会乱来？</span></summary>
+          <p lang="en">Act mode has full access so it can actually finish the job. It reports what it changed and how to undo it, and Esc stops it immediately. When you only want to look, use Ask mode — it's read-only.</p>
+          <p lang="zh-CN">操作模式完全放行，这样才能真把事做完；做完会告诉你改了什么、怎么撤销，按 Esc 立刻停下。只想看看的时候用问答模式，它是只读的。</p>
+        </details>
+        <details>
+          <summary><span lang="en">How do updates work?</span><span lang="zh-CN">怎么更新？</span></summary>
+          <p lang="en">Settings → General → Version checks for new versions. Click Update and the installer does the rest; your settings and history are kept.</p>
+          <p lang="zh-CN">设置 → 通用 → 版本 会检查新版本。点“更新”，安装器装好新版本后自动打开，设置和记录都保留。</p>
+        </details>
+        <details>
+          <summary><span lang="en">How do I uninstall it?</span><span lang="zh-CN">怎么卸载？</span></summary>
+          <p lang="en">Windows Settings → Apps → Super Aide → Uninstall. You can choose to delete your data as well.</p>
+          <p lang="zh-CN">在 Windows 的“设置 → 应用”里找到超级助手，点卸载；可以选同时删除你的数据。</p>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <a class="brand" href="#top"><span class="orb" aria-hidden="true"></span><span lang="en">Super Aide</span><span lang="zh-CN">超级助手</span></a>
+      <nav aria-label="Links">
+        <a href="https://github.com/typing233/super-aide">GitHub</a>
+        <a href="https://github.com/typing233/super-aide/releases"><span lang="en">Releases</span><span lang="zh-CN">版本</span></a>
+        <a href="https://pypi.org/project/super-aide/">PyPI</a>
+        <a href="https://github.com/typing233/super-aide/blob/main/LICENSE"><span lang="en">MIT License</span><span lang="zh-CN">MIT 许可证</span></a>
+        <button class="link-btn" type="button" data-toggle-lang><span lang="en">中文</span><span lang="zh-CN">English</span></button>
+      </nav>
+      <p class="copyright">© 2026 typing233</p>
+    </div>
+  </footer>
+
+  <script src="main.js" defer></script>
+</body>
+</html>

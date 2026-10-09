@@ -10,3 +10,9 @@ spikes/out/
 src/super_aide/_release/
 # 安装器的编译产物
 installer/out/
+# 宣传片（video/，Remotion）的依赖和渲染产物；成品放在 website/assets/
+video/node_modules/
+video/out/
+# 发布官网时生成：最新版安装器和版本信息（.github/workflows/pages.yml）
+website/download/
+website/latest.json
