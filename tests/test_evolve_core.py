@@ -111,6 +111,17 @@ def test_patch_tolerates_shifted_lines(tmp_path):
     assert "line ten" in (target / "src/a.py").read_text(encoding="utf-8")
 
 
+def test_change_already_merged_upstream_with_neighbours_edited(tmp_path):
+    """本地改进合进主线以后，主线又改了旁边几行：反着套补丁对不上，但改动确实已经在里面了，不用再搬迁
+    （2026-10-09：设置里隐藏"界面操作"那一行合进主线后，旁边加了"数据位置"，又起了一个搬迁任务）。"""
+    patch = patching.diff_trees(tree(tmp_path / "old", BEFORE), tree(tmp_path / "new", AFTER))
+    edited = dict(AFTER, **{"src/a.py": AFTER["src/a.py"].replace("line 9\n", "line 9 (edited upstream)\n")})
+    target = tree(tmp_path / "target", edited)
+    assert not patching.applies(patch, target, reverse=True)
+    assert patching.included(patch, target)
+    assert not patching.included(patch, tree(tmp_path / "before", BEFORE))  # 还没改的：不算已包含
+
+
 def test_conflicting_patch_changes_nothing(tmp_path):
     patch = patching.diff_trees(tree(tmp_path / "old", BEFORE), tree(tmp_path / "new", AFTER))
     changed = dict(BEFORE, **{"src/a.py": BEFORE["src/a.py"].replace("line 10\n", "line X\n")})

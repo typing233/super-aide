@@ -759,7 +759,8 @@ class EvolveManager(QObject):
         for old in chain:
             patch_file = self.jobs.folder(old) / "change.patch"
             patch = patch_file.read_text(encoding="utf-8") if patch_file.exists() else ""
-            if not patch or patching.applies(patch, self.workshop.root, reverse=True):
+            if not patch or patching.applies(patch, self.workshop.root, reverse=True) \
+                    or patching.included(patch, self.workshop.root):  # 已经合进主线了（旁边几行后来又改过也算）
                 old.pr.setdefault("superseded", job.id)
                 continue
             try:

@@ -137,6 +137,46 @@ def _find(text: list[str], needle: list[str], hint: int) -> int:
     return -1
 
 
+def _runs(hunk: Hunk, sign: str) -> list[list[str]]:
+    """一处改动里连续加上（sign='+'）或删掉（'-'）的那几段，每行去掉行尾空白。"""
+    runs: list[list[str]] = []
+    current: list[str] = []
+    for ln in hunk.lines + [" "]:
+        if ln[:1] == sign:
+            current.append(ln[1:].rstrip())
+        elif ln[:1] != ("-" if sign == "+" else "+") and current:  # 中间夹着另一种符号不算断开
+            runs.append(current)
+            current = []
+    return [r for r in runs if any(r)]
+
+
+def included(patch: str, root: Path) -> bool:
+    """这份改动是不是已经在 root 里了：加上的每一段都在、只删不加的那几段都不在了，不管周围的上下文。
+    反着套补丁更严格：改动合进主线以后主线又动了旁边几行，就对不上了（2026-10-09 因此又搬迁了一遍）。"""
+    parsed = parse(patch)
+    if not parsed:
+        return False
+    for fp in parsed:
+        target = root / fp.path
+        if fp.binary:
+            return False
+        if fp.deleted:
+            if target.exists():
+                return False
+            continue
+        text = _read(target) if target.exists() else None
+        if text is None:
+            return False
+        lines = [ln.rstrip() for ln in text]
+        for hunk in fp.hunks:
+            added = _runs(hunk, "+")
+            if any(_find(lines, run, 0) < 0 for run in added):
+                return False
+            if not added and any(_find(lines, run, 0) >= 0 for run in _runs(hunk, "-")):
+                return False
+    return True
+
+
 def apply_to_text(original: list[str], fp: FilePatch, reverse: bool = False) -> list[str]:
     """把一个文件的补丁套到 original 上，返回新内容。套不上抛 PatchError。"""
     out = list(original)
