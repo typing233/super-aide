@@ -10,9 +10,9 @@ jobs:
   test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10.2.0  # 从 v8 起只发完整版本号的标签
         with:
           python-version: "3.12"
 
