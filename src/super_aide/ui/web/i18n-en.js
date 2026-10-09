@@ -105,14 +105,8 @@ window.I18N_EN = {
   '30 分钟': '30 min',
   '通用': 'General',
   '开机自动启动': 'Start with Windows',
-  '界面操作': 'Computer use',
-  '自研': 'Built-in',
-  '已接通': 'Connected',
+  '浏览器操作': 'Browser control',
   '没接通': 'Not connected',
-  'Codex 没用官方账号登录，用自研的：浏览器和桌面应用都能直接操作，不需要装插件':
-    'Codex isn\'t signed in with an official account, so the built-in one works with browsers and desktop apps '
-    + 'directly, no plugins needed',
-  'Codex 官方账号：用它自带的 Computer Use 和 Chrome 插件': 'Official Codex account: uses its own Computer Use and Chrome plugin',
   '{names} 都已就绪': 'Ready: {names}',
   '{names} 还没装好或没配模型': 'Needs setup: {names}',
   '检查': 'Check',

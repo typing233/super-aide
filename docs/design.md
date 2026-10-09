@@ -510,7 +510,7 @@ v1 的 10% 在线探索、"按难度阈值定强度、失败加一档"、按模�
 **怎么选**（`engines/computer.py`）：
 - Codex 用官方账号登录（`~/.codex/auth.json` 里有 ChatGPT 令牌）、没配自定义 `model_provider` → 用官方的。Claude 需要动界面时转交 Codex，原来的流程不变。
 - 否则 → 两个引擎都挂上同一个自研的工具服务器（MCP，stdio）。Codex 自带的 Computer Use、Browser Use、Chrome 插件关掉，也不再预热（省掉约 40 秒）。
-- 设置窗口"界面操作"一行显示当前用的是哪个。
+- 设置窗口里不显示用的是哪个：这件事不用你管（原来"通用"里有一行"界面操作"，用户反馈多余，2026-10-09 去掉）。只有用官方的、浏览器操作又没接通（没装 Chrome 插件）时，"通用"里才出现"浏览器操作"一行，写着怎么接通。
 
 **自研工具服务器**（`src/super_aide/cu/`，`python -m super_aide.cu.server`）：
 - 工具：

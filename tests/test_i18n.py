@@ -125,7 +125,8 @@ for (const file of fs.readdirSync(dir)) {
   if (fs.statSync(path.join(dir, file)).isDirectory()) continue;
   const text = fs.readFileSync(path.join(dir, file), 'utf8');
   if (file.endsWith('.html')) {
-    for (const m of text.matchAll(/<(\w+)([^>]*\sdata-i18n(?:=""|\s|>)[^>]*)>([^<]*)</g)) add(m[3], file);
+    // data-i18n 后面只往前看：吃掉 ">" 的话，<span data-i18n>文字</span> 取到的是结束标签后面的空白，文字漏查
+    for (const m of text.matchAll(/<(\w+)([^>]*\sdata-i18n(?==""|\s|>)[^>]*)>([^<]*)</g)) add(m[3], file);
     for (const m of text.matchAll(/data-i18n-(?:placeholder|title|aria-label)="([^"]*)"/g)) add(m[1], file);
   } else if (file.endsWith('.js') && !['i18n-en.js', 'i18n.js'].includes(file) && !file.includes('.min.')) {
     for (const m of text.matchAll(/I18N\.t\(\s*'((?:[^'\\]|\\.)*)'/g)) add(m[1].replace(/\\'/g, "'"), file);

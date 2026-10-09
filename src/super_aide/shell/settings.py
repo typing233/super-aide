@@ -53,9 +53,9 @@ class SettingsBridge(WindowBridge):
         data = config.to_dict(self.host.cfg)
         data["autostart"] = autostart.is_enabled()
         data["resolved_theme"] = self.host.resolved_theme()
-        official = computer.official_codex()
-        status = browser_use.status() if official else browser_use.Status(True)
-        data["browser"] = {"ready": status.ready, "problem": status.problem, "official": official}
+        # 浏览器操作：只有用 Codex 官方账号时要接通它的 Chrome 插件（自研的直接能操作）。没接通时设置里才显示修法
+        status = browser_use.status() if computer.official_codex() else browser_use.Status(True)
+        data["browser"] = {"ready": status.ready, "problem": status.problem}
         data["tools"] = self._tools
         data["version"] = __version__
         data["lang"] = i18n.lang()

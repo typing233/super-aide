@@ -106,7 +106,7 @@ async function save() {
     banner(resp.errors.join('\n'));
   } else {
     if (resp.data.lang !== state.data.lang) {
-      // 换了语言：整页按新语言重画（界面操作那一行的说明也由宿主按新语言重新给）
+      // 换了语言：整页按新语言重画（浏览器操作没接通时那一行的修法也由宿主按新语言重新给）
       Object.assign(state.data, { lang: resp.data.lang, browser: resp.data.browser });
       render();
     }
@@ -128,14 +128,11 @@ function render() {
   renderBlocked();
   $('#shadow-eval').classList.toggle('on', d.router.shadow_eval !== false);
   $('#autostart').classList.toggle('on', Boolean(d.autostart));
-  const browser = d.browser || { ready: true, problem: '', official: false };
-  $('#browser-status').textContent = !browser.official ? I18N.t('自研')
-    : (browser.ready ? I18N.t('已接通') : I18N.t('没接通'));
-  $('#browser-status').className = `status-pill ${browser.ready ? 'ok' : 'bad'}`;
-  $('#browser-note').textContent = !browser.official
-    ? I18N.t('Codex 没用官方账号登录，用自研的：浏览器和桌面应用都能直接操作，不需要装插件')
-    : browser.ready ? I18N.t('Codex 官方账号：用它自带的 Computer Use 和 Chrome 插件')
-      : browser.problem.replace(/^(浏览器操作还没接通：|Browser control isn't connected yet: )/, '');
+  // 浏览器操作没接通时才出现这一行，写着怎么接通（只有用 Codex 官方账号时才要接通）；
+  // 平时不显示：用的是哪一套、接通了没有，都没什么要你做的
+  const browser = d.browser || { ready: true, problem: '' };
+  $('#browser-row').hidden = browser.ready;
+  $('#browser-note').textContent = browser.problem.replace(/^(浏览器操作还没接通：|Browser control isn't connected yet: )/, '');
   $('#setup-note').textContent = setupNote(d.tools || {});
   renderUpdate();
   renderEvolve();

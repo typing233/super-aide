@@ -1,8 +1,10 @@
-"""设置的实时生效：快捷键换不上时回退、模型改动触发重建、隐私名单同步、无控制台时隐藏子进程窗口。"""
+"""设置的实时生效：快捷键换不上时回退、模型改动触发重建、隐私名单同步、无控制台时隐藏子进程窗口；
+浏览器操作那一行只在没接通时出现。"""
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from types import SimpleNamespace
 
@@ -150,6 +152,32 @@ def test_bridge_save_and_load(monkeypatch):
     state["privacy"]["clipboard_max_age_s"] = "很久"
     resp = json.loads(bridge.save(json.dumps(state)))
     assert resp["errors"] and len(host.applied) == 1  # 不合法的不会交给宿主
+
+
+def test_browser_row_only_when_there_is_something_to_fix(monkeypatch):
+    """原来"通用"里总有一行"界面操作"，说用的是自研的还是官方的，用户觉得多余：你什么也不用做。
+    现在平时不显示；只有用 Codex 官方账号、它的浏览器操作没接通时才出现，写着怎么接通。"""
+    page = settings_ui.SETTINGS_PAGE.read_text(encoding="utf-8")
+    row = re.search(r'<div[^>]*\bid="browser-row"[^>]*>', page)
+    assert row and " hidden" in row.group(0)  # 页面默认藏着：宿主说没接通（ready 为 false）才放出来
+
+    monkeypatch.setattr(settings_ui.autostart, "is_enabled", lambda: False)
+    host = SimpleNamespace(cfg=config.Config(), resolved_theme=lambda: "light",
+                           evolve=SimpleNamespace(snapshot=lambda: {"enabled": True, "items": []}))
+    bridge = settings_ui.SettingsBridge(host, window=None)
+    checked: list[str] = []
+    missing = settings_ui.browser_use.Status(False, "浏览器操作还没接通：先装上示例插件。")
+    monkeypatch.setattr(settings_ui.browser_use, "status", lambda process="": checked.append(process) or missing)
+
+    monkeypatch.setattr(settings_ui.computer, "official_codex", lambda: False)
+    assert bridge._state()["browser"] == {"ready": True, "problem": ""}  # 自研的：浏览器直接能操作，不显示
+    assert checked == []  # 用不上 Codex 的 Chrome 插件，也就不去查它
+
+    monkeypatch.setattr(settings_ui.computer, "official_codex", lambda: True)
+    assert bridge._state()["browser"] == {"ready": False, "problem": missing.problem}  # 显示修法
+
+    monkeypatch.setattr(settings_ui.browser_use, "status", lambda process="": settings_ui.browser_use.Status(True))
+    assert bridge._state()["browser"] == {"ready": True, "problem": ""}  # 官方的、已经接通：也不显示
 
 
 def test_child_consoles_hidden_without_console(monkeypatch):
