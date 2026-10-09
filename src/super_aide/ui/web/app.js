@@ -33,6 +33,7 @@ const state = {
   ticker: null,
   toastTimer: null,
   dockTimer: null,
+  pillAnim: null, // 胶囊正在展开或收起
   placeholders: {}, // 宿主给的推荐问题（已经是当前语言）；没给的用 PLACEHOLDER
   hasRecent: false,
 };
@@ -144,6 +145,14 @@ function keepScrolled() {
   const overflow = answer.scrollHeight > answer.clientHeight + 1;
   answer.classList.toggle('scrollable', overflow);
   if (overflow && !live.done) answer.scrollTop = answer.scrollHeight;
+  updateFades(answer);
+}
+
+// 只在还有内容没露出来的那一边渐隐：滚到顶时第一行、滚到底时最后一行都是清楚的
+function updateFades(box) {
+  const overflow = box.scrollHeight > box.clientHeight + 1;
+  box.classList.toggle('fade-top', overflow && box.scrollTop > 1);
+  box.classList.toggle('fade-bottom', overflow && box.scrollTop + box.clientHeight < box.scrollHeight - 1);
 }
 
 function scheduleRender() {
@@ -207,7 +216,7 @@ function startCard(question) {
   $('#question').textContent = question;
   $('#question').title = '';
   $('#answer').innerHTML = '';
-  $('#answer').classList.remove('scrollable');
+  $('#answer').classList.remove('scrollable', 'fade-top', 'fade-bottom');
   $('#steps').hidden = true;
   $('#followup').value = '';
   setStatus(I18N.t('正在看你的屏幕…'));
@@ -218,21 +227,96 @@ function startCard(question) {
 function startPill(task) {
   stopAll();
   Object.assign(live, { question: task, draft: '', statuses: [], done: false, error: '' });
+  $('#pill').classList.remove('open');
+  $('#pill-row').title = I18N.t('展开');
+  $('#pill-task').textContent = task;
+  $('#pill-steps').innerHTML = '';
   $('#pill-text').textContent = I18N.t('正在理解任务…');
   $('#pill-time').textContent = '0:00';
   const note = $('#pill-note');
   note.hidden = false;
   note.classList.remove('faded');
   show('pill');
+  requestAnimationFrame(() => reportPillArea());
   later(PILL_NOTE_MS).then(() => {
     note.classList.add('faded');
     return later(450);
-  }).then(() => { note.hidden = true; });
+  }).then(() => {
+    note.hidden = true;
+    reportPillArea();
+  });
   const t0 = Date.now();
   state.ticker = setInterval(() => {
     const s = Math.floor((Date.now() - t0) / 1000);
     $('#pill-time').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }, 250);
+}
+
+// 胶囊点开成小窗：看得到任务和做过的每一步；点底下那一行收回去。窗口大小不变，只是页面里的形变动画
+function setPillOpen(open) {
+  const pill = $('#pill');
+  if (state.view !== 'pill' || state.pillAnim || pill.classList.contains('open') === open) return;
+  const from = pill.getBoundingClientRect();
+  pill.classList.add('open');
+  if (open) {
+    $('#pill-note').hidden = true;
+    renderPillSteps();
+  }
+  const big = pill.getBoundingClientRect();
+  pill.classList.toggle('open', open);
+  const to = pill.getBoundingClientRect();
+  pill.classList.add('open'); // 收起的时候内容先留着，跟着缩回去，结束后再收
+  reportPillArea(big); // 动画期间窗口形状取展开后的大小
+  const ease = 'cubic-bezier(0.2, 0.8, 0.2, 1)';
+  const morph = pill.animate([
+    { width: `${from.width}px`, height: `${from.height}px` },
+    { width: `${to.width}px`, height: `${to.height}px` },
+  ], { duration: open ? 280 : 220, easing: ease, fill: 'forwards' });
+  const fade = $('#pill-detail').animate(open ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 1 }, { opacity: 0 }],
+    { duration: open ? 200 : 120, delay: open ? 70 : 0, easing: 'ease-out', fill: 'both' });
+  state.pillAnim = morph;
+  morph.finished.catch(() => {}).then(() => {
+    state.pillAnim = null;
+    pill.classList.toggle('open', open);
+    morph.cancel(); // 动画停在最后一帧，换好样式再撤掉：中间不会露出一帧原来的大小
+    fade.cancel();
+    $('#pill-row').title = I18N.t(open ? '收起' : '展开');
+    reportPillArea();
+  });
+}
+
+function stepRows(box, statuses, current = -1) {
+  box.innerHTML = '';
+  statuses.forEach((s, i) => {
+    const row = el('div', i === current ? 'now' : '');
+    const text = el('span');
+    text.textContent = s;
+    row.title = s;
+    row.appendChild(text);
+    box.appendChild(row);
+  });
+}
+
+function renderPillSteps() {
+  const box = $('#pill-steps');
+  stepRows(box, live.statuses, live.done ? -1 : live.statuses.length - 1);
+  box.scrollTop = box.scrollHeight;
+}
+
+// 宿主只保留胶囊（展开时是小窗）连同阴影的那一块窗口，别处的点击穿过去
+function reportPillArea(rect) {
+  if (!bridge || state.view !== 'pill') return;
+  let { left, top, right, bottom } = rect || $('#pill').getBoundingClientRect();
+  const note = $('#pill-note');
+  if (!note.hidden) {
+    const n = note.getBoundingClientRect();
+    left = Math.min(left, n.left);
+    right = Math.max(right, n.right);
+    bottom = Math.max(bottom, n.bottom);
+  }
+  const pad = 16;
+  bridge.pillArea(Math.floor(left - pad), Math.floor(top - pad), Math.ceil(right - left) + 2 * pad,
+    Math.ceil(bottom - top) + 2 * pad);
 }
 
 function setStatus(text, isError = false) {
@@ -250,9 +334,12 @@ function onEvent(ev) {
     }
     case 'status': {
       if (!ev.text) break;
-      if (live.statuses[live.statuses.length - 1] !== ev.text) live.statuses.push(ev.text);
-      if (state.view === 'pill') $('#pill-text').textContent = ev.text;
-      else if (state.view === 'card' && !live.draft) setStatus(ev.text);
+      // "正在思考…"这类只是让你知道它在想，不算一步，不进步骤列表
+      if (!ev.transient && live.statuses[live.statuses.length - 1] !== ev.text) live.statuses.push(ev.text);
+      if (state.view === 'pill') {
+        $('#pill-text').textContent = ev.text;
+        if ($('#pill').classList.contains('open') && !ev.transient) renderPillSteps();
+      } else if (state.view === 'card' && !live.draft) setStatus(ev.text);
       break;
     }
     case 'new_message':
@@ -343,15 +430,7 @@ function openResultCard(focusFollowup) {
   $('#question').textContent = live.question;
   setStatus(live.error || '', Boolean(live.error));
   const steps = $('#steps');
-  steps.innerHTML = '';
-  for (const s of live.statuses) {
-    const row = el('div');
-    const text = el('span');
-    text.textContent = s;
-    row.title = s;
-    row.appendChild(text);
-    steps.appendChild(row);
-  }
+  stepRows(steps, live.statuses);
   steps.hidden = live.statuses.length === 0;
   $('#card-view').classList.remove('thinking');
   setMode('ask');
@@ -452,6 +531,7 @@ for (const [id, value] of [['#rate-good', 1], ['#rate-bad', -1]]) {
   });
 }
 $('#copy-all').addEventListener('click', () => copyText(live.draft || $('#answer').innerText));
+$('#answer').addEventListener('scroll', (e) => updateFades(e.currentTarget), { passive: true });
 $('#dock-close').addEventListener('click', dismiss);
 $('#dock-expand').addEventListener('click', () => {
   if (bridge) bridge.expandDock(); // 宿主先让窗口能拿到焦点，再切回卡片
@@ -464,6 +544,8 @@ $('#dock-steps').addEventListener('click', (e) => {
   const li = e.target.closest('li');
   if (li) li.classList.toggle('done');
 });
+$('#pill-row').addEventListener('click', () => setPillOpen(!$('#pill').classList.contains('open')));
+new ResizeObserver(() => { if (!state.pillAnim) reportPillArea(); }).observe($('#pill')); // 步骤说明变长变短
 $('#toast-view').addEventListener('mouseenter', () => clearTimeout(state.toastTimer));
 $('#toast-view').addEventListener('mouseleave', armToastTimer);
 $('#toast-detail').addEventListener('click', (e) => { e.preventDefault(); openResultCard(false); });

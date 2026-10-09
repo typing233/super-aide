@@ -15,7 +15,6 @@ EN = {
     "已撤销改进": "Improvement undone",
 
     # 托盘
-    "已完成自我改进：{title}": "Improved itself: {title}",
     "正在自我改进 · 先看看是不是助手的问题": "Improving itself · checking whether it's the assistant's fault",
     "正在自我改进 · 正在准备": "Improving itself · preparing",
     "正在自我改进 · 正在分析和修改": "Improving itself · analyzing and changing code",

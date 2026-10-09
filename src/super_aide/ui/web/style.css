@@ -300,8 +300,10 @@ input::placeholder { color: var(--text-3); }
 
 .answer:empty { display: none; }
 
-/* 超出最高高度时上下边缘渐隐 */
-.answer.scrollable {
+/* 超出最高高度时，只在还有内容没露出来的那一边渐隐（滚到顶、滚到底时第一行和最后一行不被糊住） */
+.answer.fade-top { -webkit-mask: linear-gradient(transparent, #000 14px); }
+.answer.fade-bottom { -webkit-mask: linear-gradient(#000 calc(100% - 18px), transparent); }
+.answer.fade-top.fade-bottom {
   -webkit-mask: linear-gradient(transparent, #000 14px, #000 calc(100% - 18px), transparent);
 }
 
@@ -422,15 +424,42 @@ input::placeholder { color: var(--text-3); }
 
 /* ---------- ③ 胶囊 ---------- */
 
+/* 胶囊和它下面的提示贴在右下角（窗口也贴在屏幕右下角）。操作中窗口固定是展开后的大小：展开、收起只是页面里的动画，
+   窗口不跟着变，不会闪。没被胶囊占着的透明地方，宿主用窗口形状让点击穿过去 */
+.pill-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-end;
+  gap: 8px;
+  width: 500px;
+  height: 400px;
+}
+
+/* 宿主只保留胶囊四周 16px 的窗口：阴影收紧，落在这里面 */
+.pill, .pill-note { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14), 0 1px 2px rgba(0, 0, 0, 0.06); }
+[data-theme="dark"] .pill,
+[data-theme="dark"] .pill-note { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.25); }
+
 .pill {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end; /* 展开动画里内容从上面被裁掉，底下那一行一直在原地 */
+  max-width: 100%;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.pill-row {
+  flex: none;
+  display: flex;
   align-items: center;
   gap: 10px;
   height: 40px;
   padding: 0 16px 0 15px;
-  border-radius: 999px;
   font-size: 13.5px;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .pill-time {
@@ -445,12 +474,50 @@ input::placeholder { color: var(--text-3); }
   text-overflow: ellipsis;
 }
 
-/* 胶囊和它下面的提示，靠右对齐（窗口贴在屏幕右下角） */
-.pill-group {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
+/* 收起时悬停才露出"能展开"的小箭头；展开后箭头朝下，旁边提示 Esc 停止 */
+.pill-chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 -5px 0 -3px;
+  fill: none;
+  stroke: var(--text-3);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transition: opacity 160ms var(--ease), transform 240ms var(--ease);
+}
+
+.pill-row:hover .pill-chevron, .pill.open .pill-chevron { opacity: 1; }
+.pill.open .pill-chevron { transform: rotate(180deg); }
+
+.pill-hint { display: none; font-size: 12px; color: var(--text-3); }
+.pill.open .pill-hint { display: inline; }
+
+.pill-detail { display: none; }
+.pill.open { width: 380px; border-radius: 18px; }
+.pill.open .pill-detail { display: block; padding: 14px 16px 10px; }
+.pill.open .pill-row { border-top: 1px solid var(--divider); }
+.pill.open .pill-text { flex: 1; }
+
+.pill-task {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pill-steps { max-height: 214px; }
+.pill-steps:empty { display: none; }
+.pill-steps div.now span { color: var(--text); }
+.pill-steps div.now::before {
+  background: linear-gradient(135deg, var(--a), var(--b));
+  animation: breathe 1.6s ease-in-out infinite;
 }
 
 .pill-note {

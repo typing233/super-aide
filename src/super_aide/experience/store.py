@@ -61,7 +61,7 @@ def _clean(items) -> list[str]:
 class Store:
     def __init__(self, path: Path | None = None) -> None:
         # AIDE_LESSONS：自检时指到临时文件（Codex 的工具服务器是另一个进程，靠它跟着换）
-        self.path = path or Path(os.environ.get("AIDE_LESSONS") or paths.HOME / "experience" / "lessons.json")
+        self.path = path or Path(os.environ.get("AIDE_LESSONS") or paths.EXPERIENCE / "lessons.json")
         self._lock = threading.Lock()
         self._mtime = -1.0
         self._lessons: dict[str, Lesson] = {}

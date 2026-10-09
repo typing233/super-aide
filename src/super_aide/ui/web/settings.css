@@ -676,3 +676,9 @@ textarea:focus { border-color: color-mix(in srgb, var(--a) 45%, transparent); }
 }
 
 #community-head[hidden], #community-tile[hidden] { display: none; }
+
+/* ---------- 数据位置 ---------- */
+
+.data-label { min-width: 0; }
+.data-label small { overflow-wrap: anywhere; }
+.row-actions { flex: none; display: flex; gap: 2px; }

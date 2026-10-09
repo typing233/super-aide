@@ -20,6 +20,8 @@ import time
 from collections.abc import Callable
 from ctypes import wintypes
 
+from . import passthrough
+
 MAX_HOLD = 8.0  # 一次最多挡这么久，之后不管助手做没做完都放开
 SETTLE = 1.2  # 最多等你松开按着的键多久
 #: 按着会改掉助手输入的：鼠标左、右、中键，Shift、Ctrl、Alt、左右 Win
@@ -86,6 +88,7 @@ class Guard:
 
     def engage(self) -> None:
         """要动真实键鼠了：开始挡（已经在挡就什么也不做）。"""
+        passthrough.lift()  # 胶囊、进度小窗截图里看不见，先让点击穿过去，免得接走助手的点击（关了护栏也要）
         if self.held or not self.enabled:
             return
         if self._thread is None:
@@ -115,6 +118,7 @@ class Guard:
 
     def release(self, keep_cursor: bool = False, target: int = 0) -> None:
         """这一段真实键鼠做完了：放开。你刚才在别处用鼠标的话，把鼠标放回去。"""
+        passthrough.restore()
         if not self.held:
             return
         self.held = False

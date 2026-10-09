@@ -70,6 +70,7 @@ class Controller(QObject):
         self.screen = screens.primary()  # 这次召唤所在的屏幕
         self.view: str | None = None  # 为空：面板收在屏幕外
         self.content = INPUT_SIZE
+        self.pill_area = QRect()  # 胶囊（展开时是小窗）在窗口里占的那一块，别处的点击穿过去
         self.anchor = QPoint()
         self.snap: Snapshot | None = None
         self.kind = "text"
@@ -97,6 +98,7 @@ class Controller(QObject):
         b.reasoned.connect(lambda kind, choice, text: self.hub.reason(self.conv_key, kind, choice, text))
         b.shown_on_screen.connect(self._on_shown)
         b.dock_expanded.connect(self._expand_dock)
+        b.pill_area.connect(self._on_pill_area)
         self.overlay.reselected.connect(self._on_reselected)
         self.panel.deactivated.connect(self._on_deactivated)
         self.kind_found.connect(self._on_kind)
@@ -158,6 +160,9 @@ class Controller(QObject):
         if self.view == "dock":
             # 四周给阴影留的透明边也会挡住下面窗口的点击（实测）。贴边时会长时间停在别的窗口上，只保留卡片本身
             self.panel.setMask(QRegion(MARGIN, MARGIN, w - 2 * MARGIN, h - 2 * MARGIN))
+        elif self.view == "pill" and not self.pill_area.isEmpty():
+            # 操作中窗口是展开后的大小，只保留胶囊（展开时是小窗）那一块，别处的透明地方让点击穿过去
+            self.panel.setMask(QRegion(self.pill_area))
         elif not self.panel.mask().isEmpty():
             self.panel.clearMask()
 
@@ -366,13 +371,27 @@ class Controller(QObject):
             self.panel.view.page().runJavaScript("app.mode()", 0, lambda m: self.overlay.set_mode(m or "ask"))
         else:
             self.overlay.move(PARK)
+        # 胶囊能点开：不再整个鼠标穿透，只是还不知道它在窗口里哪一块之前先穿透（见 _on_pill_area）。
+        # 点它也不抢走焦点：助手正在操作的窗口不受影响。助手动真实鼠标时，工具服务器会让它暂时穿透（cu/passthrough.py）
+        self.pill_area = QRect()
         self.panel.set_click_through(view == "pill")
+        self.panel.set_no_activate(view in ("pill", "dock"))
         if view == "pill" and self.prev_fg:
             try:
                 win32gui.SetForegroundWindow(self.prev_fg)  # 开始操作前把焦点还给原来的窗口
             except Exception:  # noqa: BLE001 - 原窗口可能已关闭
                 pass
         self._place()
+
+    def _on_pill_area(self, x: int, y: int, w: int, h: int) -> None:
+        if self.view != "pill":
+            return
+        first = self.pill_area.isEmpty()
+        self.pill_area = QRect(x, y, w, h)
+        self.panel.setMask(QRegion(self.pill_area))
+        if first:
+            # 只在胶囊刚出来时撤掉穿透。之后的上报（步骤说明一变就会报）只改形状：这时工具服务器可能正让它穿透着
+            self.panel.set_click_through(False)
 
     def _on_deactivated(self) -> None:
         # 点了别处：回答完的卡片淡出，分步骤的回答缩到屏幕边上；还在回答时不打断（可能只是在对照着看）

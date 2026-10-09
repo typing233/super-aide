@@ -27,6 +27,7 @@ EN = {
     "正在查看打开的窗口…": "Checking the open windows…",
     "正在屏幕上圈出位置…": "Highlighting the spot on screen…",
     "正在操作界面…": "Working on screen…",
+    "正在思考…": "Thinking…",
 
     # 进度行：其它工具（Claude、Codex、DeepSeek Harness）
     "正在运行 {command}": "Running {command}…",

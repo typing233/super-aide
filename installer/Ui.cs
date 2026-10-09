@@ -598,8 +598,9 @@ namespace SuperAideSetup
                 await setup.Uninstall(removeData);
                 ShowDone(L.T("已卸载超级助手", "Super Aide is uninstalled"),
                          L.T("Claude Code、Codex 是独立的工具，没有动。", "Claude Code and Codex are separate tools and were left alone.") +
-                         (removeData ? "" : L.T("\n你的数据还在 " + Places.DataDir + "，不要了可以直接删掉。",
-                                                "\nYour data is still in " + Places.DataDir + "; delete it if you don't need it.")));
+                         (removeData ? "" : L.T("\n你的数据还在 " + (Places.MovedDataDir ?? Places.DataDir) + "，不要了可以直接删掉。",
+                                                "\nYour data is still in " + (Places.MovedDataDir ?? Places.DataDir) +
+                                                "; delete it if you don't need it.")));
                 FormClosed += delegate { Setup.RemoveAppDirLater(); };
                 AutoFinish(true);
             }

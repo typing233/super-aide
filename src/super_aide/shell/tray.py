@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -50,22 +48,16 @@ EVOLVE_LABELS = {
     ("ready", ""): "自我改进好了 · 点这里确认生效",
     ("applying", ""): "自我改进 · 正在生效",
 }
-RECENT_DONE_S = 3600  # 完成后菜单里那一行再留这么久
 
 
 def evolve_label(state: dict | None) -> str:
-    """托盘里显示的一行（空 = 没有在做的）。"""
-    if not state:
+    """托盘里显示的一行：只在改进进行中（含等你确认生效）才有；做完了就不再占地方（生效时已经弹过通知）。"""
+    active = (state or {}).get("active")
+    if not active:
         return ""
-    active = state.get("active")
-    if active:
-        key = (active["status"], active.get("phase", "") if active["status"] == "running" else "")
-        text = EVOLVE_LABELS.get(key) or EVOLVE_LABELS.get((active["status"], ""), "")
-        return tr(text) if text else ""
-    done = next((j for j in state.get("items", []) if j.get("status") == "done"), None)
-    if done and time.time() - (done.get("finished") or 0) < RECENT_DONE_S:
-        return tr("已完成自我改进：{title}", title=done.get("title", ""))
-    return ""
+    key = (active["status"], active.get("phase", "") if active["status"] == "running" else "")
+    text = EVOLVE_LABELS.get(key) or EVOLVE_LABELS.get((active["status"], ""), "")
+    return tr(text) if text else ""
 
 
 class Tray(QSystemTrayIcon):

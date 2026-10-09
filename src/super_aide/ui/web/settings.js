@@ -40,6 +40,7 @@ const state = {
   confirming: '',        // 两步确认（撤销、不要了、合并）：第一次点过的那个按钮
   confirmTimer: null,
   ticker: null,          // 正在改进的那一行的计时
+  moving: null,          // 换数据位置：选好的去处、搬的进度、出错的原因
 };
 
 // ---------- 基础 ----------
@@ -134,6 +135,7 @@ function render() {
   $('#browser-row').hidden = browser.ready;
   $('#browser-note').textContent = browser.problem.replace(/^(浏览器操作还没接通：|Browser control isn't connected yet: )/, '');
   $('#setup-note').textContent = setupNote(d.tools || {});
+  renderData();
   renderUpdate();
   renderEvolve();
   if (state.focus) focusSection(state.focus);
@@ -177,6 +179,54 @@ function renderUpdate() {
   }
   const evolved = state.data.evolve_state && state.data.evolve_state.evolved;
   if (evolved && typeof u !== 'string') note.textContent += ` · ${I18N.t('已自我改进 {n} 次', { n: evolved })}`;
+}
+
+// ---------- 数据位置 ----------
+
+// 平时写着数据在哪 → 选好文件夹后问你要不要搬（搬去哪、多少数据）→ 搬的进度 → 搬完重启。出错停在原地，写着原因
+function renderData() {
+  const note = $('#data-note');
+  const actions = $('#data-actions');
+  actions.innerHTML = '';
+  const m = state.moving;
+  if (m && m.percent !== undefined) {
+    const text = m.finished ? I18N.t('搬好了，正在重启…')
+      : I18N.t('正在搬到 {path}… {percent}%', { path: m.target, percent: m.percent });
+    note.innerHTML = `<span class="shimmer">${escapeHtml(text)}</span>`;
+    return;
+  }
+  if (m && m.target && !m.problem) {
+    note.textContent = I18N.t('搬到 {path}？现在有 {size} 数据，搬完会重启超级助手', { path: m.target, size: m.size });
+    actions.append(textBtn(I18N.t('取消'), () => { state.moving = null; renderData(); }));
+    actions.append(textBtn(I18N.t('移动'), startMove, 'accent'));
+    return;
+  }
+  note.textContent = m ? (m.problem || m.error) : state.data.data_dir;
+  actions.append(textBtn(I18N.t('更改…'), chooseDataDir));
+}
+
+async function chooseDataDir() {
+  const result = JSON.parse((await call('chooseDataDir')) || '{}');
+  if (!result.target) return; // 没选
+  state.moving = result;
+  renderData();
+}
+
+async function startMove() {
+  const { target } = state.moving;
+  state.moving = { target, percent: 0 };
+  renderData();
+  const problem = await call('moveData', target);
+  if (problem) {
+    state.moving = { error: problem };
+    renderData();
+  }
+}
+
+function dataMoved(result) {
+  if (result.error) state.moving = { error: result.error };
+  else state.moving = { ...state.moving, percent: result.finished ? 100 : result.percent, finished: result.finished };
+  renderData();
 }
 
 function checkUpdate() {
@@ -982,7 +1032,7 @@ $('#community-check').addEventListener('click', () => call('communityCheck'));
 
 // ---------- 宿主调用的接口 ----------
 
-window.settings = { reload, modelsRefreshed, stopRecording, updateChecked, evolveChanged, focusSection };
+window.settings = { reload, modelsRefreshed, stopRecording, updateChecked, dataMoved, evolveChanged, focusSection };
 
 // ---------- 浏览器预览：模拟数据 ----------
 
@@ -1019,6 +1069,7 @@ const PREVIEW_DATA = {
     dsh: { installed: false, configured: false, detail: '' },
   },
   version: '0.2.0+aide.2',
+  data_dir: 'C:\\Users\\you\\.super_aide',
   autostart: false,
   evolve: { enabled: true, contribute: 'auto' },
   evolve_state: {
@@ -1072,6 +1123,12 @@ const preview = {
   checkUpdate: () => setTimeout(() => updateChecked({ current: '0.1.0', latest: '0.2.0', newer: true, managed: true,
                                                       source: 'GitHub', error: '' }), 700),
   applyUpdate: () => '',
+  chooseDataDir: () => JSON.stringify({ target: 'D:\\SuperAide', size: '338 MB', problem: '' }),
+  moveData: () => {
+    [25, 60, 100].forEach((percent, i) => setTimeout(() => dataMoved(percent < 100 ? { percent } : { finished: true }),
+      500 * (i + 1)));
+    return '';
+  },
   suggest: () => JSON.stringify({ id: 'x', position: 2 }),
   evolveDiff: () => '--- a/src/super_aide/shell/controller.py\n+++ b/src/super_aide/shell/controller.py\n@@ -340,6 +340,7 @@\n     def _on_esc(self) -> None:\n         self.signals.stop()\n+        self._return_focus()\n         if self.hub.is_busy(self.conv_key):\n',
   evolveApply: () => '',

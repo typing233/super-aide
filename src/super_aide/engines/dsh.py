@@ -336,7 +336,7 @@ class DshEngine:
         if mode == "act":
             note = computer.ACT_NOTE + (ELECTRON_NOTE if env.get("ELECTRON_RUN_AS_NODE") else "")
         provider_id = provider()
-        patch = paths.HOME / "dsh" / f"{mode}.yml"
+        patch = paths.DSH / f"{mode}.yml"
         patch.parent.mkdir(parents=True, exist_ok=True)
         patch.write_text(patch_text(mode, provider_id, self.instructions + note, paths.PLUGIN / "skills"),
                          encoding="utf-8")

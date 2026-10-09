@@ -50,7 +50,7 @@ class Embedder:
     def __init__(self, name: str = DEFAULT, root: Path | None = None) -> None:
         self.name = name
         self.spec = MODELS[name]
-        self.dir = (root or paths.HOME / "models") / name
+        self.dir = (root or paths.MODELS) / name
         self._session = None
         self._tokenizer = None
         self._inputs: list[str] = []

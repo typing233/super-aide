@@ -47,12 +47,20 @@
       </footer>
     </section>
 
-    <!-- ③ 操作中：胶囊 -->
+    <!-- ③ 操作中：胶囊。点一下向上展开成小窗，看助手在做哪一步；点底下那一行收回去 -->
     <section id="pill-view" class="pill-group" hidden>
-      <div class="surface pill">
-        <span class="orb" aria-hidden="true"></span>
-        <span class="pill-text" id="pill-text"></span>
-        <span class="pill-time" id="pill-time">0:00</span>
+      <div class="surface pill" id="pill">
+        <div class="pill-detail" id="pill-detail">
+          <div class="pill-task" id="pill-task"></div>
+          <div class="steps pill-steps" id="pill-steps"></div>
+        </div>
+        <div class="pill-row" id="pill-row" title="展开" data-i18n-title="展开">
+          <span class="orb" aria-hidden="true"></span>
+          <span class="pill-text" id="pill-text"></span>
+          <span class="pill-time" id="pill-time">0:00</span>
+          <span class="pill-hint" data-i18n>Esc 停止</span>
+          <svg class="pill-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 12l4-4 4 4"/></svg>
+        </div>
       </div>
       <div class="surface pill-note" id="pill-note" data-i18n>你可以继续用电脑，不会打扰助手</div>
     </section>

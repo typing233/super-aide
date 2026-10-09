@@ -362,9 +362,13 @@ class ClaudeSession:
                     continue
                 ev = msg.event
                 kind = ev.get("type")
+                block = ev.get("content_block", {}).get("type") if kind == "content_block_start" else ""
                 if kind == "message_start":
                     yield Event("new_message")
-                elif kind == "content_block_start" and ev.get("content_block", {}).get("type") == "tool_use":
+                elif block in ("thinking", "redacted_thinking"):
+                    # 思考强度高时要想一阵才开口：告诉你它在想（不算一步，不进步骤列表）
+                    yield Event("status", tr("正在思考…"), {"transient": True})
+                elif block == "tool_use":
                     yield Event("retract")  # 工具调用之前那段话是过程说明
                 elif kind == "content_block_delta" and ev.get("delta", {}).get("type") == "text_delta":
                     yield Event("delta", ev["delta"].get("text", ""))

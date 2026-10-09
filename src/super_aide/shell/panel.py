@@ -37,6 +37,7 @@ class Bridge(QObject):
     view_changed = Signal(str)
     shown_on_screen = Signal()
     dock_expanded = Signal()
+    pill_area = Signal(int, int, int, int)  # 胶囊（展开时是小窗）连同阴影在窗口里占的那一块
 
     @Slot()
     def ready(self) -> None:
@@ -81,6 +82,10 @@ class Bridge(QObject):
     @Slot()
     def expandDock(self) -> None:  # noqa: N802
         self.dock_expanded.emit()
+
+    @Slot(int, int, int, int)
+    def pillArea(self, x: int, y: int, w: int, h: int) -> None:  # noqa: N802
+        self.pill_area.emit(x, y, w, h)
 
     @Slot(str)
     def copy(self, text: str) -> None:

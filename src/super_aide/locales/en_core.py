@@ -133,4 +133,12 @@ EN = {
     "帮我按推荐设置好": "Set it up the recommended way",
     "这是什么？": "What is this?",
     "帮我处理": "Handle this for me",
+    # 数据位置
+    "选择数据位置": "Choose a data folder",
+    "数据已经在这里了": "The data is already here",
+    "新位置和现在的数据文件夹不能一个套着一个": "The new folder can't be inside the current data folder, or contain it",
+    "这个文件夹写不进去：{error}": "Can't write to this folder: {error}",
+    "{drive} 空间不够：要 {need}，只剩 {free}": "Not enough space on {drive}: needs {need}, only {free} free",
+    "没能搬过去：{error}": "Couldn't move the data: {error}",
+    "数据已经移到新位置": "Data moved to the new folder",
 }

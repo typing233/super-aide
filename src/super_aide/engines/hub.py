@@ -388,13 +388,14 @@ class EngineHub(QObject):
         finished = False
         try:
             async for ev in conv.session.send(text, images):
-                if ev.type in ("status", "done") and trace:
+                transient = ev.data.get("transient")  # "正在思考…"：只在界面上显示，不算一步
+                if ev.type in ("status", "done") and trace and not transient:
                     _note_slow_step(trace, time.monotonic() - step_started)
                 if ev.type in ("new_message", "retract"):
                     answer = ""
                 elif ev.type == "delta":
                     answer += ev.text
-                elif ev.type == "status" and ev.text and (not trace or trace[-1] != ev.text):
+                elif ev.type == "status" and ev.text and not transient and (not trace or trace[-1] != ev.text):
                     trace.append(ev.text)  # 助手做了哪些步骤：总结经验时用来看它绕没绕路
                     step_started = time.monotonic()
                 elif ev.type == "done":

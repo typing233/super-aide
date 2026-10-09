@@ -6,16 +6,18 @@ import ctypes
 import hashlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
 import threading
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from . import __version__, autostart, config, history, hotkeys, i18n, paths, update
+from . import __version__, autostart, config, history, hotkeys, i18n, paths, relocate, update
 from .engines import prompts
 from .engines.hub import EngineHub
 from .evolve.manager import EvolveManager, wait_for_apply, write_health
@@ -44,6 +46,11 @@ kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
 kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
 kernel32.WaitForSingleObject.restype = ctypes.c_uint
 CREATE_NO_WINDOW, CREATE_NEW_CONSOLE, DETACHED_PROCESS = 0x08000000, 0x00000010, 0x00000008
+CREATE_NEW_PROCESS_GROUP, SYNCHRONIZE = 0x00000200, 0x00100000
+#: 自己重启自己（换了数据位置）：新的进程带上旧进程的编号，先等它退出，单实例检查才过得去
+RESTART_FLAG = "--restart-after"
+kernel32.OpenProcess.restype = ctypes.c_void_p
+kernel32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
 
 
 def _has_console() -> bool:
@@ -99,6 +106,27 @@ def _watch_child_exits() -> None:
         threading.Thread(target=wait, name="child-exit", daemon=True).start()
 
     windows_events._WindowsSubprocessTransport._start = start
+
+
+def _wait_for_previous(timeout_ms: int = 30000) -> None:
+    if RESTART_FLAG not in sys.argv:
+        return
+    try:
+        pid = int(sys.argv[sys.argv.index(RESTART_FLAG) + 1])
+    except (IndexError, ValueError):
+        return
+    handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+    if handle:
+        kernel32.WaitForSingleObject(handle, timeout_ms)
+        kernel32.CloseHandle(handle)
+
+
+def relaunch() -> None:
+    """起一个新的自己（不弹控制台窗口），它等这个进程退出后再起来。"""
+    exe = Path(sys.executable)
+    windowless = exe.with_name("pythonw.exe")
+    subprocess.Popen([str(windowless if windowless.exists() else exe), "-m", "super_aide", RESTART_FLAG, str(os.getpid())],
+                     creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, close_fds=True)
 
 
 SYNCED = ".synced.json"
@@ -238,13 +266,16 @@ class SuperAide:
         self.tray.messageClicked.connect(self._notice_clicked)
         self._notice_target = ""  # 最近一条系统通知是谁发的：自我改进的通知点开就到设置里那一条
 
-    def start(self, announce: bool = False, updated: bool = False) -> None:
+    def start(self, announce: bool = False, updated: bool = False, moved: bool = False) -> None:
         failed = self._register_hotkeys(self.cfg)
         if failed:
             self.tray.showMessage(app_name(), tr("快捷键 {keys} 注册失败（可能被其它程序占用），可以在设置里换一个。",
                                                  keys=tr("、").join(failed)), QSystemTrayIcon.Warning, 8000)
+        elif moved:
+            self.tray.showMessage(tr("数据已经移到新位置"), str(paths.DATA), QSystemTrayIcon.Information, 6000)
         elif announce or updated:
             self.announce(updated=updated)
+        threading.Thread(target=relocate.cleanup, name="relocate-cleanup", daemon=True).start()
         try:
             autostart.upgrade()
         except OSError as e:
@@ -265,6 +296,16 @@ class SuperAide:
         self.tray.showMessage(title, tr("按 {ask} 问答，{act} 操作。右键托盘图标可以打开设置。",
                                         ask=self.cfg.hotkey_ask, act=self.cfg.hotkey_act),
                               QSystemTrayIcon.Information, 6000)
+
+    def restart(self) -> None:
+        """换了数据位置：起一个新的自己（它会等这个退出），自己退出。"""
+        try:
+            relaunch()
+        except OSError as e:
+            log.warning("没能重启：%s", e)
+            return
+        log.info("数据位置换好了，重启")
+        QTimer.singleShot(300, self.app.quit)
 
     def apply_update(self, release: update.Release | None) -> str:
         """设置里点了更新：交给安装器（它等 Super Aide 退出后再装），自己退出。返回没能开始的原因。"""
@@ -495,8 +536,9 @@ class Startup:
         self.app.aboutToQuit.connect(self.aide.shutdown)
         # 刚准备完也提示：告诉你怎么用。安装器更新完重新打开时带 --updated；自我改进生效后重启时由它自己提示
         evolving = any(flag in sys.argv for flag in EVOLVE_FLAGS)
-        self.aide.start(announce=(result is not None or not self.quiet) and not evolving,
-                        updated="--updated" in sys.argv)
+        moved = RESTART_FLAG in sys.argv
+        self.aide.start(announce=(result is not None or not self.quiet) and not evolving and not moved,
+                        updated="--updated" in sys.argv, moved=moved)
 
 
 def main() -> int:
@@ -504,6 +546,9 @@ def main() -> int:
     _setup_logging()
     _hide_child_consoles()
     _watch_child_exits()
+    _wait_for_previous()
+    # 引擎再启动的工具服务器靠它认出我们自己的窗口（截图里看不见的胶囊、小窗），动真实鼠标时让点击穿过去
+    os.environ["SUPER_AIDE_PID"] = str(os.getpid())
     wait_for_apply()  # 你点了"生效"、正在换包：等它换完再启动（它自己重启我们时不用等）
     if not _single_instance():
         log.info("已经在运行了")

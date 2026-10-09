@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from pathlib import Path
 from typing import Protocol
 
 from PySide6.QtCore import QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
+from PySide6.QtWidgets import QFileDialog
 
-from .. import __version__, autostart, config, i18n, paths, update
+from .. import __version__, autostart, config, i18n, paths, relocate, update
 from ..i18n import app_name, tr
 from ..engines import browser_use, computer
 from ..setup import detect
@@ -33,6 +35,7 @@ class SettingsHost(Protocol):
     def settings_closed(self) -> None: ...
     def open_setup(self) -> None: ...
     def apply_update(self, release: update.Release | None) -> str: ...
+    def restart(self) -> None: ...
 
     evolve: object  # EvolveManager
 
@@ -41,6 +44,7 @@ class SettingsBridge(WindowBridge):
     """网页通过 QWebChannel 调用这些槽。"""
 
     update_checked = Signal(dict)  # 后台线程查完更新 → 主线程交给网页
+    data_moved = Signal(dict)  # 换数据位置：后台线程的进度（done/total）、出错（error）、搬完（finished）
 
     def __init__(self, host: SettingsHost, window: WebWindow | None) -> None:
         super().__init__(window)
@@ -48,6 +52,7 @@ class SettingsBridge(WindowBridge):
         self._tools: dict = {}  # 打开窗口时查一次装没装、配没配（每拨一下开关都查就太慢了）
         self._release: update.Release | None = None  # 最近一次查到的新版本
         self._checking = False
+        self._moving = False
 
     def _state(self) -> dict:
         data = config.to_dict(self.host.cfg)
@@ -59,6 +64,7 @@ class SettingsBridge(WindowBridge):
         data["tools"] = self._tools
         data["version"] = __version__
         data["lang"] = i18n.lang()
+        data["data_dir"] = str(paths.DATA)
         data["evolve_state"] = self.host.evolve.snapshot()  # 进度和记录（data["evolve"] 是配置：开关、社区共建）
         return data
 
@@ -106,6 +112,52 @@ class SettingsBridge(WindowBridge):
     @Slot()
     def openConfig(self) -> None:  # noqa: N802
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.CONFIG)))
+
+    # ---- 数据位置 ----
+
+    @Slot(result=str)
+    def chooseDataDir(self) -> str:  # noqa: N802
+        """选文件夹（系统的选择框）。返回要搬去的地方、现在有多少数据、不能搬的原因；没选就是 {}。"""
+        chosen = QFileDialog.getExistingDirectory(self.window, tr("选择数据位置"), str(paths.DATA.parent))
+        if not chosen:
+            return "{}"
+        target = relocate.target_for(Path(chosen))
+        total = relocate.size()
+        return json.dumps({"target": str(target), "size": relocate.human(total), "problem": relocate.problem(target, total)},
+                          ensure_ascii=False)
+
+    @Slot(str, result=str)
+    def moveData(self, target: str) -> str:  # noqa: N802
+        """复制过去（后台，进度由 data_moved 交给网页），记下新位置，重启。返回没能开始的原因。"""
+        if self._moving:
+            return ""
+        path = Path(target)
+        problem = relocate.problem(path, relocate.size())
+        if problem:
+            return problem
+        self._moving = True
+        last = [-1]
+
+        def progress(done: int, total: int) -> None:
+            percent = done * 100 // max(total, 1)
+            if percent != last[0]:  # 一个百分点报一次，不是每个文件都报
+                last[0] = percent
+                self.data_moved.emit({"percent": percent})
+
+        def run() -> None:
+            try:
+                relocate.copy(path, progress)
+                relocate.commit(path)
+            except OSError as e:
+                log.warning("换数据位置失败：%s", e)
+                self._moving = False
+                self.data_moved.emit({"error": tr("没能搬过去：{error}", error=e)})
+                return
+            log.info("数据复制到了 %s", path)
+            self.data_moved.emit({"finished": True})
+
+        threading.Thread(target=run, name="relocate", daemon=True).start()
+        return ""
 
     @Slot()
     def openSetup(self) -> None:  # noqa: N802
@@ -193,6 +245,7 @@ class SettingsWindow(WebWindow):
         self.host = host
         bridge = SettingsBridge(host, self)
         bridge.update_checked.connect(self._update_checked)
+        bridge.data_moved.connect(self._data_moved)
         self.load_page(SETTINGS_PAGE, bridge)
 
     def _js(self, code: str) -> None:
@@ -225,6 +278,11 @@ class SettingsWindow(WebWindow):
 
     def _update_checked(self, result: dict) -> None:
         self._js(f"settings.updateChecked({json.dumps(result, ensure_ascii=False)})")
+
+    def _data_moved(self, result: dict) -> None:
+        self._js(f"settings.dataMoved({json.dumps(result, ensure_ascii=False)})")
+        if result.get("finished"):
+            self.host.restart()  # 新位置下次启动起生效：重启，新的进程起来后删掉旧的那份
 
     def models_refreshed(self, result: dict) -> None:
         if self.isVisible():

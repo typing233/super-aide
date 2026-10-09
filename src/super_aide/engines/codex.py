@@ -29,6 +29,7 @@ from openai_codex.generated.v2_all import (
     ItemStartedNotification,
     McpToolCallThreadItem,
     MessagePhase,
+    ReasoningThreadItem,
     TurnCompletedNotification,
 )
 
@@ -236,6 +237,8 @@ class CodexSession:
                         commentary.add(item.id)
                     else:
                         yield Event("new_message")
+                elif isinstance(item, ReasoningThreadItem):
+                    yield Event("status", tr("正在思考…"), {"transient": True})  # 不算一步，不进步骤列表
                 elif isinstance(item, CommandExecutionThreadItem):
                     script = item.command.split(" -Command ", 1)[-1].strip().strip("'\"")
                     yield Event("status", computer.command_status(script))

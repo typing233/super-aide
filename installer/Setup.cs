@@ -93,6 +93,25 @@ namespace SuperAideSetup
             return false;
         }
         public static string DataDir { get { return In("data", Path.Combine(Home, ".super_aide")); } }
+        // 设置里换过数据位置的话（设置 → 通用 → 数据位置），数据在 location.json 记的那个文件夹里，设置文件还在 DataDir
+        public static string MovedDataDir
+        {
+            get
+            {
+                try
+                {
+                    var record = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(
+                        File.ReadAllText(Path.Combine(DataDir, "location.json")));
+                    object value;
+                    string dir = record != null && record.TryGetValue("data", out value) ? value as string : null;
+                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return null;
+                    bool same = string.Equals(Path.GetFullPath(dir).TrimEnd('\\'), Path.GetFullPath(DataDir).TrimEnd('\\'),
+                                              StringComparison.OrdinalIgnoreCase);
+                    return same ? null : dir;
+                }
+                catch (Exception) { return null; }
+            }
+        }
         static string RegistryRoot
         {
             get { return Sandboxed ? @"Software\SuperAideSetupSandbox" : @"Software\Microsoft\Windows\CurrentVersion"; }
@@ -922,7 +941,12 @@ namespace SuperAideSetup
                 if (removeData)
                 {
                     sink.Step(3);
-                    try { if (Directory.Exists(Places.DataDir)) Directory.Delete(Places.DataDir, true); }
+                    try
+                    {
+                        string moved = Places.MovedDataDir; // 先读：location.json 在 DataDir 里
+                        if (moved != null) Directory.Delete(moved, true);
+                        if (Directory.Exists(Places.DataDir)) Directory.Delete(Places.DataDir, true);
+                    }
                     catch (IOException ex) { sink.Line(L.T("没删干净我的数据：", "Couldn't delete all of my data: ") + ex.Message); }
                     catch (UnauthorizedAccessException ex) { sink.Line(L.T("没删干净我的数据：", "Couldn't delete all of my data: ") + ex.Message); }
                 }
