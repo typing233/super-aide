@@ -5,7 +5,7 @@ from __future__ import annotations
 import ctypes
 import json
 
-from PySide6.QtCore import QEvent, QObject, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from .. import paths
 
 MARGIN = 40  # 与 CSS 中 #root 的 padding 一致：给阴影留的透明边
+INPUT_SIZE = QSize(600 + 2 * MARGIN, 56 + 2 * MARGIN)  # 输入框连同透明边（CSS 中 .input-bar 是 600×56）
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x20
 WS_EX_NOACTIVATE = 0x08000000
@@ -101,7 +102,7 @@ class Panel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.view)
         self.view.load(QUrl.fromLocalFile(str(paths.UI_INDEX)))
-        self.resize(600 + 2 * MARGIN, 56 + 2 * MARGIN)
+        self.resize(INPUT_SIZE)
 
     def call(self, fn: str, arg: object = None) -> None:
         payload = "" if arg is None else json.dumps(arg, ensure_ascii=False)

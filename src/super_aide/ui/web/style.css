@@ -91,6 +91,9 @@ body {
 
 [hidden] { display: none !important; }
 
+/* 收在屏幕外时什么都不画（宿主调用 app.park()）；尺寸不变，宿主那边的窗口大小也不跟着变 */
+body.parked #root { visibility: hidden; }
+
 /* ---------- 通用表面 ---------- */
 
 .surface {

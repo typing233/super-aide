@@ -29,7 +29,7 @@ from ..cu.signals import Signals
 from .killswitch import EscWatcher
 from . import screens
 from .overlay import Overlay
-from .panel import MARGIN, Bridge, Panel, disable_transitions, exclude_from_capture
+from .panel import INPUT_SIZE, MARGIN, Bridge, Panel, disable_transitions, exclude_from_capture
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ GAP = 20              # 输入框与选区的距离
 EDGE = 20             # 胶囊、结果提示与屏幕边缘的距离
 #: 空闲时窗口停在屏幕外而不是隐藏：重新显示一个窗口要多等一两百毫秒（实测），挪回来几乎不花时间
 PARK = QPoint(-30000, -30000)
+PARKED_FRAME_MS = 100  # 网页把收起后的空白画到窗口上，留足这么久
 RECENT_S = 600        # 10 分钟内可以 Ctrl+Enter 接着上次问
 CLIPBOARD_LIMIT = 2000
 NEGATIVE_FOLLOWUP = re.compile(r"不对|错了|没用|不行|没解决|还是不|不是这样|没有用|不管用|失败了"
@@ -67,10 +68,9 @@ class Controller(QObject):
         self.esc = EscWatcher()
         self.signals = Signals()  # 和界面操作的工具服务器之间：Esc 停止、收起屏幕指引
         self.screen = screens.primary()  # 这次召唤所在的屏幕
-        self.view: str | None = None
-        self.content = QSize(600 + 2 * MARGIN, 56 + 2 * MARGIN)
+        self.view: str | None = None  # 为空：面板收在屏幕外
+        self.content = INPUT_SIZE
         self.anchor = QPoint()
-        self.offset = QPoint()  # 预热时把面板放到屏幕外
         self.snap: Snapshot | None = None
         self.kind = "text"
         self.conv_key = ""
@@ -152,7 +152,7 @@ class Controller(QObject):
         else:  # 胶囊和结果提示：右下角
             x = avail.right() - w + MARGIN - EDGE
             y = avail.bottom() - h + MARGIN - EDGE
-        self.panel.setGeometry(QRect(QPoint(x, y) + self.offset, QSize(w, h)))
+        self.panel.setGeometry(QRect(QPoint(x, y), QSize(w, h)))
         if self.view == "dock":
             # 四周给阴影留的透明边也会挡住下面窗口的点击（实测）。贴边时会长时间停在别的窗口上，只保留卡片本身
             self.panel.setMask(QRegion(MARGIN, MARGIN, w - 2 * MARGIN, h - 2 * MARGIN))
@@ -169,9 +169,8 @@ class Controller(QObject):
         也只是把窗口挪回来，不用重新显示（实测重新显示要多等一两百毫秒）。"""
         geo, _, _ = self._screen()
         self.collector.warm()
-        # 网页显示输入框后会报告"输入框出来了"，那时会按正常位置摆放面板：预热期间摆放都加上这个偏移，留在屏幕外
-        # （没有它，启动后输入框会停在屏幕左上角，实测）
-        self.offset = PARK
+        # 在屏幕外把输入框画一遍。网页画好后报上来的视图和尺寸不会把面板摆回屏幕上：面板收着（self.view 为空）
+        # 时不理它们，开机时网页慢、预热结束后才报上来也一样（见 _on_view）
         self.panel.call("showInput", {"mode": "ask", "theme": self.theme(), "lang": i18n.lang()})
         self.panel.setAttribute(Qt.WA_ShowWithoutActivating, True)  # 预热不抢当前窗口的焦点
         self.panel.move(PARK)
@@ -181,8 +180,6 @@ class Controller(QObject):
 
         def finish() -> None:
             self.panel.setAttribute(Qt.WA_ShowWithoutActivating, False)
-            self.offset = QPoint()
-            self.view = None
             self._park()
             self.ready = True
             log.info("界面就绪")
@@ -190,6 +187,9 @@ class Controller(QObject):
         QTimer.singleShot(600, finish)
 
     def _park(self) -> None:
+        # 网页先清空：下次召唤时窗口一挪回来，露出的是它最后画的那一帧，不能是上一次的输入框或卡片
+        # （网页重画好之前，旧画面会先闪一下）
+        self.panel.call("park")
         self.overlay.move(PARK)
         self.panel.move(PARK)
 
@@ -232,6 +232,7 @@ class Controller(QObject):
         self.snap = self.collector.start(cap, on_kind=lambda kind: self.kind_found.emit(cap_id, kind))
 
         self.view = "input"
+        self.content = INPUT_SIZE  # 上一次是回答卡片时，不先按卡片的高度摆、再跳到输入框该在的位置
         self.panel.set_click_through(False)
         self.panel.set_no_activate(False)
         recent = bool(self.conv_key) and time.time() - self.conv_time < RECENT_S
@@ -351,6 +352,10 @@ class Controller(QObject):
             self._place()
 
     def _on_view(self, view: str) -> None:
+        if self.view is None:
+            # 面板收着（启动预热、刚关掉）：网页换了视图也不把它摆回屏幕上，只有召唤和找回回答才会。
+            # 开机时网页慢，预热那次"显示输入框"可能在预热结束后才报上来，输入框会自己停在屏幕左上角（实测）
+            return
         self.view = view
         if view == "input":  # 输入框里按 Tab 切了模式：定格画面的描边颜色跟着变
             self.panel.view.page().runJavaScript("app.mode()", 0, lambda m: self.overlay.set_mode(m or "ask"))
@@ -402,7 +407,6 @@ class Controller(QObject):
         self.signals.clear_guide()  # 收起回答，屏幕上的指引框也收起（贴边的步骤不走这里，指引会留着）
         if self.view in ("card", "input") and self.hub.is_busy(self.conv_key) and self.conv_mode == "ask":
             self.hub.interrupt(self.conv_key)
-        self.panel.call("stop")
         self._park()
         self._return_focus()
         self.panel.set_no_activate(False)
@@ -418,7 +422,12 @@ class Controller(QObject):
                 return
             except Exception:  # noqa: BLE001 - 系统不允许时退回隐藏
                 pass
-        self.panel.hide()  # 下次召唤时会重新显示
+        # 退回隐藏，下次召唤时会重新显示。重新显示时先露出的是隐藏前的最后一帧：等网页把空白画上去再隐藏
+        QTimer.singleShot(PARKED_FRAME_MS, self._hide_parked)
+
+    def _hide_parked(self) -> None:
+        if self.view is None:  # 这期间又召唤了就不隐藏
+            self.panel.hide()
 
     # ---------- 剪贴板 ----------
 

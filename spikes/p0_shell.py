@@ -405,7 +405,7 @@ class Controller(QObject):
             self.dismiss()
 
     def dismiss(self) -> None:
-        self.panel.call("stop")
+        self.panel.call("park")
         self.overlay.hide()
         self.panel.hide()
         self.view = None

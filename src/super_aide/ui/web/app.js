@@ -78,6 +78,7 @@ function setMode(mode) {
 }
 
 function show(view) {
+  document.body.classList.remove('parked');
   for (const v of VIEWS) $(`#${v}-view`).hidden = v !== view;
   const node = $(`#${view}-view`);
   node.style.animation = 'none';
@@ -453,7 +454,12 @@ const app = {
   submit(text = '') { submit(text); },
   setTheme(theme) { html.dataset.theme = theme; },
   dock,
-  stop() { stopAll(); },
+  // 宿主把窗口收到屏幕外时调用：什么都不画。下次召唤窗口一挪回来，网页重画好之前露出的是窗口最后的一帧，
+  // 不能是上一次的输入框或卡片（不然旧画面会先闪一下）
+  park() {
+    stopAll();
+    document.body.classList.add('parked');
+  },
 };
 window.app = app;
 
