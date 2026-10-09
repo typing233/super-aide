@@ -11,11 +11,16 @@
       film: "Super Aide promo film",
       alt: {
         see: "Super Aide reading the exact text of every window on a Windows desktop, including notes scrolled out of view",
-        ask: "An answer card under a terminal: the script's Python environment doesn't have pandas installed, and how to fix it",
-        act: "After Alt+W the script runs fine; result notifications stack up in the corner",
+        ask: "An answer that connects three windows: the terminal error, a line in the notes, and the deadline in a chat",
+        act: "The expanded progress pill shows each step while the assistant works",
         guide: "Numbered marks on a print dialog: choose Save as PDF, then click Save",
-        route: "Requests routed to Claude Code or Codex, each with its own model and reasoning effort",
-        evolve: "The self-improvement panel: cause found, code changed, tests and an independent review passed, applied",
+        learn: "Learning signals flow into the router while a background duel compares the current setup with a cheaper one",
+        gate: "Two small charts: the success rate holds steady while the cost per task steps down each time a cheaper setup is proven",
+        lesson: "A conversation that took a wrong turn becomes a lesson: check the module name's spelling first",
+        recall: "Days later, a question in other words recalls exactly one lesson; saying hi recalls none",
+        improve: "The self-improvement panel: cause found, code changed, tests and an independent review passed, applied",
+        personal: "Before and after a suggestion to keep answers shorter",
+        community: "An improvement merged into the main version reaches every user",
       },
     },
     zh: {
@@ -24,11 +29,16 @@
       film: "超级助手宣传片",
       alt: {
         see: "超级助手逐字读到桌面上每个窗口的文字，包括笔记里滚动出去的部分",
-        ask: "终端下方的回答卡片：运行脚本的 Python 环境里没有安装 pandas，以及怎么解决",
-        act: "按 Alt+W 之后脚本跑通了，右下角是一条条完成提示",
+        ask: "一句回答串起三个窗口：终端里的报错、笔记里的一行、聊天里的截止时间",
+        act: "展开的操作胶囊里能看到助手正在做的每一步",
         guide: "打印对话框上的编号标记：先选“另存为 PDF”，再点保存",
-        route: "每个请求被分到 Claude Code 或 Codex，各自选好模型和思考强度",
-        evolve: "自我改进面板：找到原因、改好代码、测试和复核都通过、已生效",
+        learn: "学习信号流进路由，后台对比在比较现在用的配置和更省的配置",
+        gate: "两个小图：成功率一直不降，每证明一次更省的配置，每次的花费就降一档",
+        lesson: "一段走了弯路的对话，总结成一条经验：先核对模块名拼写",
+        recall: "几天后换个说法问，只想起那一条经验；说一句你好，一条也不带",
+        improve: "自我改进面板：找到原因、改好代码、测试和复核都通过、已生效",
+        personal: "按“回答再短一点”的建议改进前后的对比",
+        community: "合进主版本的改进，推送到每一位用户",
       },
     },
   };
@@ -43,9 +53,12 @@
     if (p && p.catch) p.catch(() => {});
   };
 
+  // 首屏先循环播放 14 秒的预告（静音、文件小）；点"看宣传片"或"打开声音"才换成整部片子
+  let full = false;
+
   function setFilm() {
     const l = lang();
-    const src = video.dataset[l];
+    const src = full ? video.dataset[l] : video.dataset[l === "zh" ? "teaserZh" : "teaserEn"];
     if (video.dataset.current === src) return;
     video.dataset.current = src;
     video.src = src;
@@ -112,6 +125,7 @@
   if (video && stage) {
     const startWithSound = () => {
       video.dataset.started = "1";
+      full = true;
       setFilm();
       video.muted = false;
       video.currentTime = 0;

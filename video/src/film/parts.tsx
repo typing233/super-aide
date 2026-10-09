@@ -1,37 +1,40 @@
-// 片子的公共部件：背景、标题、装着桌面的"屏幕"、按键
+// 片子的公共部件：背景、标题、装着桌面的"屏幕"、按键、章节大字
 import React from "react";
 import { clamp, colorTrack, easeIn, easeOut, lerp, ramp } from "../lib/anim";
 import { accent, C, FONT, type Lang, type Mode } from "../lib/theme";
 import { deskCamera, DesktopShow } from "../desktop/DesktopShow";
-import { T } from "./timeline";
+import { CH } from "./timeline";
 
-// ---------- 背景：深色底 + 两团随段落换色的光 ----------
+// ---------- 背景：深色底 + 两团随章节换色的光 ----------
 
 const NOISE =
   "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='7'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>\")";
 
 export const Backdrop: React.FC<{ f: number }> = ({ f }) => {
   const a = colorTrack(f, [
-    [0, "#33467A"],
-    [T.reveal, C.askA],
-    [T.act - 10, C.askA],
-    [T.act + 20, C.actA],
-    [T.guide, C.actA],
-    [T.guide + 30, C.askA],
-    [T.outro, C.askA],
+    [0, C.askA],
+    [CH.act, C.askA],
+    [CH.act + 30, C.actA],
+    [CH.guide, C.actA],
+    [CH.guide + 30, C.askA],
   ]);
   const b = colorTrack(f, [
-    [0, "#4B3577"],
-    [T.reveal, C.askB],
-    [T.act - 10, C.askB],
-    [T.act + 20, C.actB],
-    [T.guide, C.actB],
-    [T.guide + 30, C.askB],
-    [T.route + 20, C.actB],
-    [T.evolve, C.actB],
-    [T.evolve + 30, C.askB],
+    [0, C.askB],
+    [CH.act, C.askB],
+    [CH.act + 30, C.actB],
+    [CH.guide, C.actB],
+    [CH.guide + 30, C.askB],
+    [CH.route, C.askB],
+    [CH.route + 30, C.actB],
+    [CH.exp, C.actB],
+    [CH.exp + 30, C.askB],
+    [CH.community, C.askB],
+    [CH.community + 30, C.actB],
+    [CH.recap, C.actB],
+    [CH.recap + 30, C.askB],
   ]);
-  const boost = 0.75 + 0.25 * Math.max(ramp(f, T.reveal - 6, 20) * (1 - ramp(f, T.dock, 30)), ramp(f, T.outro, 30));
+  const lift = (start: number, end: number) => ramp(f, start - 6, 20) * (1 - ramp(f, end - 20, 30));
+  const boost = 0.72 + 0.28 * Math.max(lift(CH.reveal, CH.see), lift(CH.better, CH.route), ramp(f, CH.recap + 200, 30));
   const drift = Math.sin(f / 95) * 40;
   return (
     <div style={{ position: "absolute", inset: 0, background: C.bg, overflow: "hidden" }}>
@@ -42,7 +45,7 @@ export const Backdrop: React.FC<{ f: number }> = ({ f }) => {
           opacity: boost,
           background: [
             `radial-gradient(900px 640px at ${22 + drift / 40}% ${14 + drift / 60}%, color-mix(in srgb, ${a} 34%, transparent), transparent 70%)`,
-            `radial-gradient(1000px 720px at ${84 - drift / 50}% ${92}%, color-mix(in srgb, ${b} 30%, transparent), transparent 70%)`,
+            `radial-gradient(1000px 720px at ${84 - drift / 50}% 92%, color-mix(in srgb, ${b} 30%, transparent), transparent 70%)`,
           ].join(","),
         }}
       />
@@ -84,12 +87,13 @@ export const Headline: React.FC<{
   dockAt?: number;
   centerY?: number;
   tone?: Mode | "duo";
-}> = ({ f, lang, text, sub, start, end, dockAt, centerY = 560, tone = "ask" }) => {
+  scale?: number;
+}> = ({ f, lang, text, sub, start, end, dockAt, centerY = 560, tone = "ask", scale: fixedScale }) => {
   if (f < start || f > end + 12) return null;
   const size = BIG(lang);
   const lineH = size * 1.16;
   const docked = dockAt === undefined ? 1 : ramp(f, dockAt, 26, easeOut);
-  const scale = lerp(1, DOCK_SCALE, docked);
+  const scale = fixedScale ?? lerp(1, DOCK_SCALE, docked);
   const top = lerp(centerY - lineH / 2, DOCK_TOP, docked);
   const out = ramp(f, end, 10, easeIn);
   const tokens = tokenize(text, lang);
@@ -97,7 +101,7 @@ export const Headline: React.FC<{
   const ems = tokens.filter((t) => t.em).length;
   let emIndex = 0;
   const stagger = lang === "en" ? 3 : 1.6;
-  const subStart = (dockAt ?? start) + (dockAt === undefined ? 10 : 18);
+  const subStart = (dockAt ?? start) + (dockAt === undefined ? 12 : 18);
   const subA = ramp(f, subStart, 16);
   const mix = (k: number) => `color-mix(in srgb, ${b} ${Math.round(clamp(k, 0, 1) * 100)}%, ${a})`;
   return (
@@ -125,12 +129,7 @@ export const Headline: React.FC<{
             const k0 = ems > 1 ? emIndex / ems : 0;
             const k1 = ems > 1 ? (emIndex + 1) / ems : 1;
             emIndex++;
-            style = {
-              background: `linear-gradient(90deg, ${mix(k0)}, ${mix(k1)})`,
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-            };
+            style = { background: `linear-gradient(90deg, ${mix(k0)}, ${mix(k1)})`, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" };
           }
           return (
             <span
@@ -174,6 +173,36 @@ export const Headline: React.FC<{
   );
 };
 
+/** 章节大字：画面正中两行（大标题 + 一句副标题） */
+export const TitleCard: React.FC<{ f: number; lang: Lang; text: string; sub: string; start: number; end: number; tone?: Mode | "duo" }> = ({ f, lang, text, sub, start, end, tone = "duo" }) => {
+  if (f < start || f > end + 12) return null;
+  const out = ramp(f, end, 10, easeIn);
+  const subA = ramp(f, start + 26, 18);
+  return (
+    <>
+      <Headline f={f} lang={lang} text={text} start={start} end={end} dockAt={99999} centerY={500} tone={tone} scale={1.15} />
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          top: 600,
+          textAlign: "center",
+          fontFamily: FONT.display(lang),
+          fontSize: lang === "en" ? 40 : 38,
+          fontWeight: 500,
+          color: C.text2,
+          opacity: subA * (1 - out),
+          transform: `translateY(${10 * (1 - subA) - 14 * out}px)`,
+          filter: out > 0 ? `blur(${8 * out}px)` : undefined,
+        }}
+      >
+        {sub}
+      </div>
+    </>
+  );
+};
+
 // ---------- 装着桌面的"屏幕"：升上来、里面的镜头推拉、最后沉下去 ----------
 
 export const CARD = { x: 199, y: 196, w: 1522, h: 856 };
@@ -192,10 +221,13 @@ export const DesktopViewport: React.FC<{ f: number; lang: Lang; w: number; h: nu
   );
 };
 
-export const ScreenCard: React.FC<{ f: number; lang: Lang; enter: number; exit: number }> = ({ f, lang, enter, exit }) => {
-  if (f < enter || f > exit + 30) return null;
+/** spans：屏幕出现的时间段 [升起, 沉下]；升起帧小于 0 表示一开始就在 */
+export const ScreenCard: React.FC<{ f: number; lang: Lang; spans: [number, number][] }> = ({ f, lang, spans }) => {
+  const span = spans.find(([enter, exit]) => f >= enter && f <= exit + 30);
+  if (!span) return null;
+  const [enter, exit] = span;
   const p = ramp(f, enter, 34, easeOut);
-  const e = ramp(f, exit, 24, easeIn);
+  const e = ramp(f, exit, 26, easeIn);
   return (
     <div style={{ position: "absolute", inset: 0, perspective: 2200 }}>
       <div
@@ -209,8 +241,9 @@ export const ScreenCard: React.FC<{ f: number; lang: Lang; enter: number; exit: 
           overflow: "hidden",
           boxShadow: "0 40px 120px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.10)",
           transformOrigin: "50% 100%",
-          transform: `translateY(${(1 - p) * 760 + e * 900}px) rotateX(${(1 - p) * 16}deg) scale(${1 - 0.04 * e})`,
+          transform: `translateY(${(1 - p) * 760 + e * 120}px) rotateX(${(1 - p) * 16}deg) scale(${1 - 0.08 * e})`,
           opacity: Math.min(1, p * 2.5) * (1 - e),
+          filter: e > 0 ? `blur(${10 * e}px)` : undefined,
         }}
       >
         <DesktopViewport f={f} lang={lang} w={CARD.w} h={CARD.h} />
@@ -286,3 +319,15 @@ export const Keycaps: React.FC<{ f: number; keys: string[]; at: number; press: n
     </div>
   );
 };
+
+/** 画面里的玻璃面板（深色、细边、柔和阴影），各章的示意图都用它 */
+export const panel = (extra: React.CSSProperties = {}): React.CSSProperties => ({
+  position: "absolute",
+  borderRadius: 18,
+  background: "rgba(24, 25, 30, 0.92)",
+  border: "1px solid rgba(255,255,255,0.09)",
+  boxShadow: "0 24px 70px rgba(0,0,0,0.5)",
+  color: "rgba(255,255,255,0.92)",
+  fontFamily: FONT.ui,
+  ...extra,
+});

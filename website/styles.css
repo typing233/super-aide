@@ -382,6 +382,17 @@ html[data-lang="zh"] h2 { letter-spacing: 0; line-height: 1.22; }
 .shot img { width: 100%; filter: var(--shot-shadow); }
 @media (min-width: 1240px) { .shot { margin: 0 -40px; } }
 
+/* 一个功能配两张图：上下排，窄的那张居中 */
+.shots { display: grid; gap: 28px; }
+.shot.narrow { width: 100%; max-width: 820px; margin-left: auto; margin-right: auto; }
+
+/* "越用越好"：大标题开头 */
+.better { padding-top: 168px; }
+.better-head { max-width: 900px; margin: 0 auto; text-align: center; }
+.better-head .big { margin: 0; font-size: clamp(40px, 6vw, 76px); line-height: 1.05; letter-spacing: -0.035em; }
+html[data-lang="zh"] .better-head .big { letter-spacing: 0; line-height: 1.15; }
+.better-head .lead { margin-top: 18px; }
+
 /* ---------- 放心用 ---------- */
 
 .trust, .start, .faq { max-width: var(--max); margin: 0 auto; padding: 120px 20px 0; }

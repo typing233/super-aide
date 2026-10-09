@@ -7,7 +7,7 @@
 **Press a key. Say one thing. Done.**
 
 A Windows assistant that sees your screen. Ask about anything on it, or let it do the work.<br>
-It drives **Claude Code** and **Codex** and picks the right engine, model and effort for you.
+It drives **Claude Code** and **Codex**, learns from every task, and keeps getting better — for you and for everyone.
 
 **English** · [简体中文](README.zh-CN.md)
 
@@ -19,7 +19,7 @@ It drives **Claude Code** and **Codex** and picks the right engine, model and ef
 
 </div>
 
-https://github.com/user-attachments/assets/cc6cc785-44b5-4b67-bc15-64c983eecea4
+https://github.com/user-attachments/assets/f84ddcc8-1777-4a04-9abd-1dbccb1d5a15
 
 ## What it does
 
@@ -29,17 +29,17 @@ The moment you ask, it reads the exact text of every window — even the parts s
 
 <img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/see-en.webp" width="100%" alt="Super Aide reading the exact text of every window, including notes scrolled out of view">
 
-### Ask — `Alt+Q`
+### Ask — `Alt+Q`: one question, it connects the dots
 
-One sentence about anything on screen. The answer leads with the conclusion and shows up right where you're working. Ask mode is read-only: it can read files and run read-only diagnostics, but it never changes your PC.
+The answer pulls together what's in every window — the error in your terminal, the deadline in a chat, the step in your notes — and leads with the conclusion. Ask mode is read-only: it can read files and run read-only diagnostics, but it never changes your PC.
 
-<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/ask-en.webp" width="100%" alt="An answer card under a terminal explaining that pandas isn't installed, with the fix">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/ask-en.webp" width="100%" alt="An answer that connects three windows: the terminal error, a line in the notes and the deadline in a chat">
 
-### Act — `Alt+W`
+### Act — `Alt+W`: it does the work
 
-Say what you want done — command line, files, desktop apps, web pages. It reports the result and how to undo it. Press `Esc` to stop it at any time, and keep using your PC while it works.
+Command line, files, desktop apps, web pages. Click the progress pill to see every step; when it's done it tells you what changed and how to undo it. Press `Esc` to stop it at any time, and keep using your PC while it works.
 
-<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/act-en.webp" width="100%" alt="The script runs after Alt+W; result notifications stack up in the corner">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/act-en.webp" width="100%" alt="The expanded progress pill shows each step while the assistant works">
 
 ### Shows you where to click
 
@@ -47,21 +47,38 @@ Rather do it yourself? It circles where to click, numbered in order, right on yo
 
 <img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/guide-en.webp" width="100%" alt="Numbered marks on a print dialog: choose Save as PDF, then click Save">
 
-### Claude Code + Codex, picked for you
-
-Every request gets the engine, model and reasoning effort that fits — DeepSeek Harness works too. You never describe the context or pick a model. Success comes first: a faster or cheaper setup is only used once it's proven just as good, and pitfalls it hit before come back to mind in similar situations.
-
-<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/route-en.webp" width="100%" alt="Requests routed to Claude Code or Codex, each with its own model and effort">
-
-### Improves itself
-
-When a task fails, you stop it with `Esc` and say it got something wrong, you click 👎, or you leave a suggestion in Settings, it uses Claude Code (Opus 5.5 · max) to find the cause and improve its own code; once the tests and an independent review pass, you confirm before it applies. If you like, stable improvements can be contributed upstream under your GitHub account.
-
-<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/evolve-en.webp" width="100%" alt="The self-improvement panel: cause found, code changed, tests and review passed, applied">
-
 ### English / 中文
 
 The UI follows your Windows language and can be switched in Settings; it answers in the language you ask in.
+
+## And it keeps getting better — for you, and for everyone
+
+### Routing that learns: the best first, then cheaper
+
+Every request gets the engine (Claude Code, Codex, or DeepSeek Harness), the model and the reasoning effort that fits — you never pick. Every result teaches it: your 👍 and 👎, follow-ups, failures. While you're idle it quietly answers some questions again with a cheaper setup and lets a strong model judge both; it only switches when it's 90% sure the success rate won't drop. If a round fails, the next one gets a stronger setup.
+
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/learn-en.webp" width="100%" alt="Learning signals flow into the router while a background duel compares the current setup with a cheaper one">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/gate-en.webp" width="80%" alt="Success rate holds steady while the cost per task steps down each time a cheaper setup is proven">
+
+### Never the same mistake twice
+
+When a task takes a wrong turn, it writes down what actually worked. Similar lessons merge into one and lessons that keep failing are dropped, so it never turns into a pile of notes. A lesson comes back only when the situation matches — by the error, the keywords or the meaning (a small local model) — at most two at a time. Say "hi" and nothing is recalled.
+
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/lesson-en.webp" width="100%" alt="A conversation that took a wrong turn becomes a lesson">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/recall-en.webp" width="100%" alt="Days later, a question in other words recalls exactly one lesson">
+
+### Improves itself — shaped by you
+
+When a task fails, you stop it with `Esc` and say it got something wrong, you click 👎, or you leave a suggestion in Settings, it uses Claude Code (Opus 5.5 · max) to find the cause and improve its own code; once the tests and an independent review pass, you confirm before it applies, and you can undo it any time. Your copy adapts to how you work — software that changes to fit the person using it.
+
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/improve-en.webp" width="70%" alt="The self-improvement panel: cause found, code changed, tests and review passed, applied">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/personal-en.webp" width="100%" alt="Before and after a suggestion to keep answers shorter">
+
+### One fix reaches everyone
+
+If you opt in (Settings → Advanced → Contribute to the community), improvements that run well for a day are submitted as pull requests under your GitHub account — code only, privacy-checked, nothing from your screen. The maintainer reviews and merges them, and the next update brings them to everyone. It's already happening: 0.3.0 ships an improvement Super Aide made to itself from one user's suggestion. The more people use it, the better it gets.
+
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/community-en.webp" width="80%" alt="An improvement merged into the main version reaches every user">
 
 ## Install
 

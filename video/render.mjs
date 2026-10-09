@@ -37,7 +37,7 @@ if (cmd === "frames") {
       imageFormat: "png",
       pixelFormat: "yuv420p",
       outputLocation: output,
-      concurrency: 6,
+      concurrency: 8,
       muted: true,
       onProgress: ({ progress }) => {
         const p = Math.floor(progress * 10);

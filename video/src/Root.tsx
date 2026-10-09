@@ -1,7 +1,7 @@
 import React from "react";
 import { Composition, Still } from "remotion";
 import { Film } from "./film/Film";
-import { T } from "./film/timeline";
+import { CH } from "./film/timeline";
 import { FPS } from "./lib/anim";
 import type { Lang } from "./lib/theme";
 import { OgCard, Shot, SHOTS } from "./Shots";
@@ -11,7 +11,7 @@ const LANGS: Lang[] = ["en", "zh"];
 export const Root: React.FC = () => (
   <>
     {LANGS.map((lang) => (
-      <Composition key={`film-${lang}`} id={`film-${lang}`} component={Film} durationInFrames={T.end} fps={FPS} width={1920} height={1080} defaultProps={{ lang }} />
+      <Composition key={`film-${lang}`} id={`film-${lang}`} component={Film} durationInFrames={CH.end} fps={FPS} width={1920} height={1080} defaultProps={{ lang }} />
     ))}
     {LANGS.flatMap((lang) =>
       Object.entries(SHOTS).map(([name, s]) => (

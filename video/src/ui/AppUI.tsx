@@ -1,10 +1,10 @@
 // 应用界面的复刻：尺寸、颜色、圆角、阴影、动效都照 src/super_aide/ui/web/style.css（深色主题）
 import React from "react";
 import type { Block, Run } from "../lib/copy";
-import { blink, clamp, easeIn, easeOut, ramp } from "../lib/anim";
+import { blink, clamp, easeIn, easeOut, lerp, ramp } from "../lib/anim";
 import { accent, C, FONT, UI, type Mode } from "../lib/theme";
 
-const surface = (extra: React.CSSProperties = {}): React.CSSProperties => ({
+export const surface = (extra: React.CSSProperties = {}): React.CSSProperties => ({
   position: "absolute",
   background: UI.surface,
   border: `1px solid ${UI.stroke}`,
@@ -86,7 +86,7 @@ const Caret: React.FC<{ mode: Mode; f: number; thin?: boolean }> = ({ mode, f, t
   );
 };
 
-const Chip: React.FC<{ mode: Mode; label: string }> = ({ mode, label }) => {
+export const Chip: React.FC<{ mode: Mode; label: string }> = ({ mode, label }) => {
   const [a] = accent(mode);
   return (
     <span
@@ -105,6 +105,13 @@ const Chip: React.FC<{ mode: Mode; label: string }> = ({ mode, label }) => {
   );
 };
 
+/** 打字：start 起按 cps 出字，返回已经打出来的部分 */
+export function typing(f: number, start: number, text: string, frames: number) {
+  const chars = Array.from(text);
+  const n = Math.floor(clamp((f - start) / frames, 0, 1) * chars.length);
+  return chars.slice(0, n).join("");
+}
+
 // ---------- ① 输入框 ----------
 
 export const InputBar: React.FC<{
@@ -119,7 +126,7 @@ export const InputBar: React.FC<{
   chip: string;
   focused?: boolean;
 }> = ({ mode, f, x, y, appear, leave, text, placeholder, chip, focused = true }) => {
-  if (f < appear) return null;
+  if (f < appear || f > (leave ?? Infinity) + 8) return null;
   return (
     <div
       style={surface({
@@ -137,11 +144,7 @@ export const InputBar: React.FC<{
     >
       <Orb mode={mode} f={f} />
       <span style={{ flex: 1, minWidth: 0, fontSize: 16, whiteSpace: "nowrap", overflow: "hidden" }}>
-        {text ? (
-          <span style={{ color: UI.text }}>{text}</span>
-        ) : (
-          <span style={{ color: UI.text3 }}>{placeholder}</span>
-        )}
+        {text ? <span style={{ color: UI.text }}>{text}</span> : <span style={{ color: UI.text3 }}>{placeholder}</span>}
         {focused && text ? <Caret mode={mode} f={f} thin /> : null}
       </span>
       <Chip mode={mode} label={chip} />
@@ -162,6 +165,13 @@ function sliceRuns(runs: Run[], budget: number): [Run[], number] {
   return [out, budget];
 }
 
+const RunSpan: React.FC<{ r: Run }> = ({ r }) =>
+  r.code ? (
+    <code style={{ fontFamily: FONT.mono, fontSize: "0.88em", padding: "1px 6px", borderRadius: 6, background: UI.inlineCode }}>{r.t}</code>
+  ) : (
+    <span style={{ fontWeight: r.b ? 600 : undefined }}>{r.t}</span>
+  );
+
 /** 按字数预算渲染回答（流式输出）；budget = Infinity 表示全部显示 */
 export const Rich: React.FC<{ blocks: Block[]; budget: number; mode: Mode; f: number; streaming: boolean; fontSize?: number }> = ({
   blocks,
@@ -176,7 +186,6 @@ export const Rich: React.FC<{ blocks: Block[]; budget: number; mode: Mode; f: nu
   let caretPlaced = false;
   blocks.forEach((block, i) => {
     if (left <= 0) return;
-    const total = block.runs.reduce((s, r) => s + Array.from(r.t).length, 0);
     const [runs, rest] = sliceRuns(block.runs, left);
     left = rest;
     const isLast = left <= 0 || i === blocks.length - 1;
@@ -185,11 +194,9 @@ export const Rich: React.FC<{ blocks: Block[]; budget: number; mode: Mode; f: nu
     const content = (
       <>
         {runs.map((r, k) => (
-          <span key={k} style={{ fontWeight: r.b ? 600 : undefined }}>
-            {r.t}
-          </span>
+          <RunSpan key={k} r={r} />
         ))}
-        {showCaret && Array.from(runs.map((r) => r.t).join("")).length <= total ? <Caret mode={mode} f={f} /> : null}
+        {showCaret ? <Caret mode={mode} f={f} /> : null}
       </>
     );
     if (block.kind === "pre") {
@@ -230,8 +237,7 @@ export const Rich: React.FC<{ blocks: Block[]; budget: number; mode: Mode; f: nu
   return <div style={{ fontSize, lineHeight: 1.7 }}>{rendered}</div>;
 };
 
-export const totalChars = (blocks: Block[]) =>
-  blocks.reduce((s, b) => s + b.runs.reduce((t, r) => t + Array.from(r.t).length, 0), 0);
+export const totalChars = (blocks: Block[]) => blocks.reduce((s, b) => s + b.runs.reduce((t, r) => t + Array.from(r.t).length, 0), 0);
 
 export const AnswerCard: React.FC<{
   mode: Mode;
@@ -242,6 +248,7 @@ export const AnswerCard: React.FC<{
   leave?: number;
   question: string;
   status?: string;
+  statusTone?: "shimmer" | "recall";
   blocks?: Block[];
   budget?: number;
   thinking: boolean;
@@ -249,35 +256,50 @@ export const AnswerCard: React.FC<{
   followup: string;
   followupHint: string;
   width?: number;
+  rated?: "bad";
   children?: React.ReactNode;
-}> = ({ mode, f, x, y, appear, leave, question, status, blocks, budget = 0, thinking, streaming, followup, followupHint, width = 600, children }) => {
-  if (f < appear) return null;
+}> = ({ mode, f, x, y, appear, leave, question, status, statusTone = "shimmer", blocks, budget = 0, thinking, streaming, followup, followupHint, width = 600, rated, children }) => {
+  if (f < appear || f > (leave ?? Infinity) + 8) return null;
   const shimmerPos = 100 - ((f % 54) / 54) * 200;
   return (
     <div style={surface({ left: x, top: y, width, borderRadius: 16, padding: "16px 20px 14px", ...appearStyle(f, appear, leave) })}>
       {thinking ? <ThinkingGlow mode={mode} f={f} /> : null}
-      <div style={{ display: "flex", alignItems: "center", minHeight: 26 }}>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.text2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {question}
-        </span>
+      <div style={{ display: "flex", alignItems: "center", minHeight: 26, gap: 4 }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: UI.text2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{question}</span>
+        {rated === "bad" ? (
+          <span style={{ width: 26, height: 26, display: "grid", placeItems: "center", color: C.askA }}>
+            <svg viewBox="0 0 20 20" width={16} height={16} style={{ fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" }}>
+              <path d="M13 11l-3 5.5a1.6 1.6 0 0 1-2.9-1.1l.5-3.4h-3a1.6 1.6 0 0 1-1.6-1.9l1-5A1.6 1.6 0 0 1 5.6 4H13zM13 11h2.5V4H13" />
+            </svg>
+          </span>
+        ) : null}
       </div>
       {children}
       {status ? (
-        <div
-          style={{
-            marginTop: 8,
-            fontSize: 13,
-            minHeight: 20,
-            background: `linear-gradient(90deg, ${UI.text3} 0%, ${UI.text} 45%, ${UI.text3} 90%)`,
-            backgroundSize: "200% 100%",
-            backgroundPosition: `${shimmerPos}% 0`,
-            WebkitBackgroundClip: "text",
-            backgroundClip: "text",
-            color: "transparent",
-          }}
-        >
-          {status}
-        </div>
+        statusTone === "recall" ? (
+          <div style={{ marginTop: 8, fontSize: 13, display: "flex", alignItems: "center", gap: 8, color: `color-mix(in srgb, ${C.askA} 55%, ${UI.text})` }}>
+            <svg viewBox="0 0 20 20" width={15} height={15} style={{ flex: "none", fill: "none", stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" }}>
+              <path d="M10 3.5a5 5 0 0 0-3 9v2h6v-2a5 5 0 0 0-3-9zM8 17h4" />
+            </svg>
+            {status}
+          </div>
+        ) : (
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 13,
+              minHeight: 20,
+              background: `linear-gradient(90deg, ${UI.text3} 0%, ${UI.text} 45%, ${UI.text3} 90%)`,
+              backgroundSize: "200% 100%",
+              backgroundPosition: `${shimmerPos}% 0`,
+              WebkitBackgroundClip: "text",
+              backgroundClip: "text",
+              color: "transparent",
+            }}
+          >
+            {status}
+          </div>
+        )
       ) : null}
       {blocks && budget > 0 ? (
         <div style={{ marginTop: 8 }}>
@@ -293,54 +315,84 @@ export const AnswerCard: React.FC<{
   );
 };
 
-// ---------- ③ 操作中的胶囊 ----------
+// ---------- ③ 操作中的胶囊（点一下展开成小窗，看每一步） ----------
 
 export const Pill: React.FC<{
   mode: Mode;
   f: number;
   right: number;
-  y: number;
+  bottom: number;
   appear: number;
   leave?: number;
   text: string;
   time: string;
   note?: string;
   noteFade?: number;
-}> = ({ mode, f, right, y, appear, leave, text, time, note, noteFade = Infinity }) => {
-  if (f < appear) return null;
+  open?: number; // 0 收起 → 1 展开
+  task?: string;
+  steps?: { text: string; state: "done" | "now" }[];
+  escHint?: string;
+}> = ({ mode, f, right, bottom, appear, leave, text, time, note, noteFade = Infinity, open = 0, task, steps = [], escHint }) => {
+  if (f < appear || f > (leave ?? Infinity) + 8) return null;
+  const [a, b] = accent(mode);
+  const phase = (1 - Math.cos((f / 48) * Math.PI * 2)) / 2;
   return (
-    <div style={{ position: "absolute", right, top: y, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, ...appearStyle(f, appear, leave) }}>
+    <div style={{ position: "absolute", right, bottom, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8, ...appearStyle(f, appear, leave) }}>
       <div
         style={surface({
           position: "relative",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 10,
-          height: 40,
-          padding: "0 16px 0 15px",
-          borderRadius: 999,
-          fontSize: 13.5,
-          whiteSpace: "nowrap",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "flex-end",
+          width: open > 0 ? lerp(300, 380, open) : undefined,
+          borderRadius: lerp(20, 18, open),
+          overflow: "hidden",
         })}
       >
-        <Orb mode={mode} f={f} breathe />
-        <span style={{ maxWidth: 420, overflow: "hidden", textOverflow: "ellipsis" }}>{text}</span>
-        <span style={{ color: UI.text3, fontVariantNumeric: "tabular-nums" }}>{time}</span>
+        {open > 0 ? (
+          <div style={{ maxHeight: 260 * open, overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px 10px", opacity: open }}>
+              <div style={{ fontSize: 13, lineHeight: 1.5, color: UI.text2 }}>{task}</div>
+              <div style={{ marginTop: 10, fontSize: 13, color: UI.text2 }}>
+                {steps.map((s, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 0", color: s.state === "now" ? UI.text : UI.text2 }}>
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        flex: "none",
+                        background: s.state === "now" ? `linear-gradient(135deg, ${a}, ${b})` : C.ok,
+                        transform: s.state === "now" ? `scale(${1 - 0.28 * phase})` : undefined,
+                      }}
+                    />
+                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            height: 40,
+            padding: "0 16px 0 15px",
+            fontSize: 13.5,
+            whiteSpace: "nowrap",
+            borderTop: open > 0.5 ? `1px solid ${UI.divider}` : undefined,
+          }}
+        >
+          <Orb mode={mode} f={f} breathe />
+          <span style={{ flex: open > 0.5 ? 1 : undefined, maxWidth: 420, overflow: "hidden", textOverflow: "ellipsis" }}>{text}</span>
+          <span style={{ color: UI.text3, fontVariantNumeric: "tabular-nums" }}>{time}</span>
+          {open > 0.5 && escHint ? <span style={{ fontSize: 12, color: UI.text3 }}>{escHint}</span> : null}
+        </div>
       </div>
       {note ? (
-        <div
-          style={surface({
-            position: "relative",
-            padding: "6px 12px",
-            borderRadius: 999,
-            fontSize: 12.5,
-            color: UI.text2,
-            whiteSpace: "nowrap",
-            opacity: 1 - ramp(f, noteFade, 12),
-          })}
-        >
-          {note}
-        </div>
+        <div style={surface({ position: "relative", padding: "6px 12px", borderRadius: 999, fontSize: 12.5, color: UI.text2, whiteSpace: "nowrap", opacity: 1 - ramp(f, noteFade, 12) })}>{note}</div>
       ) : null}
     </div>
   );
@@ -357,49 +409,24 @@ export const Toast: React.FC<{
   leave?: number;
   title: string;
   links: string[];
-  failed?: boolean;
-  stopped?: boolean;
+  tone?: "ok" | "stopped" | "failed";
   width?: number;
   reasons?: string[];
   chosen?: number;
   chosenAt?: number;
   thanks?: string;
-}> = ({ f, right, left, y, appear, leave, title, links, stopped, width = 340, reasons, chosen = -1, chosenAt = Infinity, thanks }) => {
-  if (f < appear) return null;
-  const tone = stopped ? UI.text2 : C.ok;
+}> = ({ f, right, left, y, appear, leave, title, links, tone = "ok", width = 340, reasons, chosen = -1, chosenAt = Infinity, thanks }) => {
+  if (f < appear || f > (leave ?? Infinity) + 8) return null;
   const answered = f >= chosenAt + 10;
+  const iconBg = tone === "ok" ? `color-mix(in srgb, ${C.ok} 16%, transparent)` : tone === "failed" ? `color-mix(in srgb, ${C.err} 16%, transparent)` : UI.hover;
   return (
-    <div
-      style={surface({
-        left,
-        right,
-        top: y,
-        width,
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 12,
-        padding: "14px 18px 14px 14px",
-        borderRadius: 16,
-        ...appearStyle(f, appear, leave),
-      })}
-    >
-      <span
-        style={{
-          flex: "none",
-          width: 24,
-          height: 24,
-          display: "grid",
-          placeItems: "center",
-          borderRadius: "50%",
-          color: tone,
-          background: stopped ? UI.hover : `color-mix(in srgb, ${C.ok} 16%, transparent)`,
-        }}
-      >
-        {stopped ? (
+    <div style={surface({ left, right, top: y, width, display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 18px 14px 14px", borderRadius: 16, ...appearStyle(f, appear, leave) })}>
+      <span style={{ flex: "none", width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: "50%", background: iconBg }}>
+        {tone === "stopped" ? (
           <span style={{ width: 7, height: 7, border: `1.5px solid ${UI.text2}`, borderRadius: 1.5 }} />
         ) : (
-          <svg viewBox="0 0 20 20" width={16} height={16} style={{ fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }}>
-            <path d="M5 10.5l3.2 3.2L15 7" />
+          <svg viewBox="0 0 20 20" width={16} height={16} style={{ fill: "none", stroke: tone === "ok" ? C.ok : C.err, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }}>
+            <path d={tone === "ok" ? "M5 10.5l3.2 3.2L15 7" : "M10 5.5v5.5M10 14.2v.3"} />
           </svg>
         )}
       </span>
@@ -410,32 +437,36 @@ export const Toast: React.FC<{
           <span>·</span>
           <span style={{ color: UI.text2 }}>{links[1]}</span>
         </div>
-        {reasons && !answered ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-            {reasons.map((r, i) => {
-              const on = i === chosen && f >= chosenAt;
-              return (
-                <span
-                  key={i}
-                  style={{
-                    fontSize: 13,
-                    padding: "5px 12px",
-                    borderRadius: 999,
-                    background: on ? `color-mix(in srgb, ${C.askA} 22%, transparent)` : UI.hover,
-                    color: on ? UI.text : UI.text2,
-                    boxShadow: on ? `inset 0 0 0 1px color-mix(in srgb, ${C.askA} 55%, transparent)` : undefined,
-                  }}
-                >
-                  {r}
-                </span>
-              );
-            })}
-          </div>
-        ) : null}
+        {reasons && !answered ? <Reasons f={f} reasons={reasons} chosen={chosen} chosenAt={chosenAt} /> : null}
       </div>
     </div>
   );
 };
+
+/** 原因选项（停下后、👎 之后都是这一行） */
+export const Reasons: React.FC<{ f: number; reasons: string[]; chosen: number; chosenAt: number; prompt?: string }> = ({ f, reasons, chosen, chosenAt, prompt }) => (
+  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 12 }}>
+    {prompt ? <span style={{ fontSize: 13, color: UI.text2, marginRight: 2 }}>{prompt}</span> : null}
+    {reasons.map((r, i) => {
+      const on = i === chosen && f >= chosenAt;
+      return (
+        <span
+          key={i}
+          style={{
+            fontSize: 13,
+            padding: "5px 12px",
+            borderRadius: 999,
+            background: on ? `color-mix(in srgb, ${C.askA} 22%, transparent)` : UI.hover,
+            color: on ? UI.text : UI.text2,
+            boxShadow: on ? `inset 0 0 0 1px color-mix(in srgb, ${C.askA} 55%, transparent)` : undefined,
+          }}
+        >
+          {r}
+        </span>
+      );
+    })}
+  </div>
+);
 
 // ---------- 屏幕指引：圈出要点的地方 ----------
 
@@ -493,10 +524,10 @@ export const GuideBox: React.FC<{ f: number; x: number; y: number; w: number; h:
 
 // ---------- 鼠标指针（用户自己点） ----------
 
-export const Cursor: React.FC<{ f: number; x: number; y: number; clicks?: number[]; opacity?: number }> = ({ f, x, y, clicks = [], opacity = 1 }) => {
+export const Cursor: React.FC<{ f: number; x: number; y: number; clicks?: number[]; opacity?: number; scale?: number }> = ({ f, x, y, clicks = [], opacity = 1, scale = 1 }) => {
   const press = clicks.reduce((m, c) => Math.max(m, f >= c && f < c + 8 ? 1 - Math.abs(f - c - 3) / 5 : 0), 0);
   return (
-    <div style={{ position: "absolute", left: x, top: y, opacity, pointerEvents: "none" }}>
+    <div style={{ position: "absolute", left: x, top: y, opacity, pointerEvents: "none", transform: `scale(${scale})`, transformOrigin: "0 0" }}>
       {clicks.map((c, i) => {
         const t = ramp(f, c, 16, easeOut);
         if (f < c || t >= 1) return null;

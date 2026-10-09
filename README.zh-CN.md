@@ -7,7 +7,7 @@
 **按一个键，说一句话，就办好。**
 
 看得见屏幕的 Windows 助手：屏幕上的东西直接问，或者让它直接动手。<br>
-背后调度 **Claude Code** 和 **Codex**，每次自动挑最合适的引擎、模型和思考强度。
+背后调度 **Claude Code** 和 **Codex**，从每次任务里学习，越用越好——对你如此，对所有人也是。
 
 [English](README.md) · **简体中文**
 
@@ -19,7 +19,7 @@
 
 </div>
 
-https://github.com/user-attachments/assets/c9457115-de0b-4df6-a82f-f01004f01685
+https://github.com/user-attachments/assets/3c84873e-12d7-41b2-b592-83ed046d6131
 
 ## 能做什么
 
@@ -29,17 +29,17 @@ https://github.com/user-attachments/assets/c9457115-de0b-4df6-a82f-f01004f01685
 
 <img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/see-zh.webp" width="100%" alt="超级助手逐字读到每个窗口的文字，包括笔记里滚动出去的部分">
 
-### 问答 · `Alt+Q`
+### 问答 · `Alt+Q`：一句话，它把前后都串起来
 
-屏幕上的东西，说一句话就问。结论先说，就出现在你正在看的地方。问答模式只读：可以读文件、跑只读的诊断命令，不会动你的电脑。
+回答会把各个窗口里的东西串起来——终端里的报错、聊天里的截止时间、笔记里的步骤——结论先说。问答模式只读：可以读文件、跑只读的诊断命令，不会动你的电脑。
 
-<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/ask-zh.webp" width="100%" alt="终端下方的回答卡片：没有安装 pandas，以及怎么解决">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/ask-zh.webp" width="100%" alt="一句回答串起三个窗口：终端里的报错、笔记里的一行、聊天里的截止时间">
 
-### 操作 · `Alt+W`
+### 操作 · `Alt+W`：它直接动手
 
-说要做什么，它直接动手做完：命令行、文件、桌面软件、网页都行，做完汇报结果和怎么撤销。随时按 `Esc` 停下；它干活的时候，你照常用电脑。
+命令行、文件、桌面软件、网页都行。点一下操作胶囊能看到每一步；做完汇报改了什么、怎么撤销。随时按 `Esc` 停下；它干活的时候，你照常用电脑。
 
-<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/act-zh.webp" width="100%" alt="按 Alt+W 后脚本跑通了，右下角是一条条完成提示">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/act-zh.webp" width="100%" alt="展开的操作胶囊里能看到助手正在做的每一步">
 
 ### 告诉你点哪里
 
@@ -47,21 +47,38 @@ https://github.com/user-attachments/assets/c9457115-de0b-4df6-a82f-f01004f01685
 
 <img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/guide-zh.webp" width="100%" alt="打印对话框上的编号标记：先选“另存为 PDF”，再点保存">
 
-### Claude Code + Codex，自动挑最合适的
-
-每次自动挑引擎、模型和思考强度（也可以用 DeepSeek Harness）。你不用描述背景，也不用选模型。先保证办成，在证明一样好的前提下才换更快、更省的配置；踩过的坑在相似情况下会想起来。
-
-<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/route-zh.webp" width="100%" alt="每个请求被分到 Claude Code 或 Codex，各自选好模型和思考强度">
-
-### 会自己改进
-
-任务没办成、你按 `Esc` 停下并说是它的问题、点了 👎，或者你在设置里提了建议，它会用 Claude Code（Opus 5.5 · max）分析原因、改进自己的代码，测试和复核都通过后请你确认生效；愿意的话，稳定的改进还能以你的 GitHub 账号贡献给主版本。
-
-<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/evolve-zh.webp" width="100%" alt="自我改进面板：找到原因、改好代码、测试和复核都通过、已生效">
-
 ### 中文 / English
 
 界面跟随系统语言，也可以在设置里切换；你用什么语言问，它就用什么语言答。
+
+## 而且越用越好——对你如此，对所有人也是
+
+### 会学习的路由：先挑最好的，再学着省钱
+
+每次自动挑引擎（Claude Code、Codex，也可以用 DeepSeek Harness）、模型和思考强度，你不用选。每一次结果都在教它：你的 👍 👎、追问、失败。你空下来的时候，它还会用更省的配置把一些问题在后台再答一遍，由强模型来评；要有 90% 把握成功率不降才会换。某一轮没办成，下一轮自动换更强的配置。
+
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/learn-zh.webp" width="100%" alt="学习信号流进路由，后台对比在比较现在用的配置和更省的配置">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/gate-zh.webp" width="80%" alt="成功率一直不降，每证明一次更省的配置，每次的花费就降一档">
+
+### 同一个坑，不踩第二次
+
+走了弯路的任务，它会总结出真正管用的做法。相似的经验合并成一条，总是不管用的会被淘汰，不会越堆越多。只有情况对得上时才想起来（看报错、关键词，也用本地小模型看意思），一次最多两条；说一句"你好"，一条也不带。
+
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/lesson-zh.webp" width="100%" alt="一段走了弯路的对话，总结成一条经验">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/recall-zh.webp" width="100%" alt="几天后换个说法问，只想起那一条经验">
+
+### 会自己改进，由你来塑造
+
+任务没办成、你按 `Esc` 停下并说是它的问题、点了 👎，或者你在设置里提了建议，它会用 Claude Code（Opus 5.5 · max）分析原因、改进自己的代码，测试和复核都通过后请你确认生效，随时可以撤销。你用的这一份，会按你的习惯改变——软件开始按用它的人改变自己。
+
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/improve-zh.webp" width="70%" alt="自我改进面板：找到原因、改好代码、测试和复核都通过、已生效">
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/personal-zh.webp" width="100%" alt="按“回答再短一点”的建议改进前后的对比">
+
+### 一人修好，人人受益
+
+愿意的话（设置 → 高级 → 参与社区共建），稳定运行一天的改进会以你的 GitHub 账号提交 PR——只有代码，提交前做隐私检查，不带你屏幕上的任何内容。维护者审核合并后，下次更新就到了每个人手里。这已经在发生：0.3.0 里就有超级助手按一位用户的建议改进自己的代码。用的人越多，它越好用。
+
+<img src="https://raw.githubusercontent.com/typing233/super-aide/main/website/assets/shots/community-zh.webp" width="80%" alt="合进主版本的改进，推送到每一位用户">
 
 ## 安装
 

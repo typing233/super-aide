@@ -9,7 +9,7 @@ import { Glyph, ScanLine, Win } from "./Desktop";
 
 export const TERM = { x: 590, y: 250, w: 820, h: 340 };
 const TERM_LINE = 24;
-const termLineY = (i: number) => TERM.y + 36 + 18 + i * TERM_LINE;
+export const termLineY = (i: number) => TERM.y + 36 + 18 + i * TERM_LINE;
 
 type TermLine = { text: string; color?: string; prompt?: boolean };
 
@@ -58,6 +58,8 @@ export const Terminal: React.FC<{
 // ---------- 团队聊天 ----------
 
 export const CHAT = { x: 1436, y: 110, w: 444, h: 520 };
+/** 第 i 条聊天消息正文的顶端 */
+export const chatMsgY = (i: number) => CHAT.y + 36 + 64 + i * 92 + 22;
 
 export const Chat: React.FC<{ copy: Copy; dim?: number }> = ({ copy, dim }) => {
   const colors = ["#E9775D", "#5B8CFF", "#E9775D"];
@@ -100,10 +102,12 @@ export const Chat: React.FC<{ copy: Copy; dim?: number }> = ({ copy, dim }) => {
 // ---------- 笔记：内容比窗口长，有一截滚动到了窗口外 ----------
 
 export const NOTES = { x: 70, y: 330, w: 500, h: 300 };
-const NOTE_SCROLL = 128;
+const NOTE_SCROLL = 200; // 有三行滚到了窗口上面
 const NOTE_LINE = 32;
 const notesTop = NOTES.y + 36 + 16 - NOTE_SCROLL; // 笔记内容（含滚出去的部分）在桌面上的顶端
 export const notesExtent = (copy: Copy) => ({ top: notesTop, bottom: notesTop + 50 + copy.notes.lines.length * NOTE_LINE + 10 });
+/** 第 i 行笔记文字的顶端（含滚出窗口的部分） */
+export const notesLineY = (i: number) => notesTop + 50 + i * NOTE_LINE + 4;
 
 const NotesDoc: React.FC<{ copy: Copy; ghost?: boolean }> = ({ copy, ghost }) => (
   <div style={{ padding: "0 26px", fontFamily: FONT.ui, color: ghost ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.88)" }}>
