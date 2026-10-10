@@ -30,6 +30,7 @@ from .shell.controller import Controller
 from .shell.history_window import HistoryWindow
 from .shell.settings import SettingsWindow
 from .shell.setup_window import SetupResult, SetupWindow
+from .shell.tour_window import TourWindow
 from .shell.tray import Tray, orb_icon
 from .snapshot.collector import Collector
 from .snapshot.uia import UiaWorker
@@ -268,10 +269,11 @@ class SuperAide:
         self.hotkeys = hotkeys.HotkeyManager(self.ctrl.on_hotkey)
         app.installNativeEventFilter(self.hotkeys)
         self.tray = Tray(self.ctrl, app, cfg, self.open_settings, self.open_history,
-                         lambda: self.open_settings("evolve"))
+                         lambda: self.open_settings("evolve"), self.open_tour)
         self.settings: SettingsWindow | None = None  # 第一次打开时再创建
         self.history: HistoryWindow | None = None
         self.setup: SetupWindow | None = None
+        self.tour: TourWindow | None = None
         #: 刚在准备窗口里配好的引擎 → 你填的模型（空 = 等发现模型时挑一个它的服务确实提供的）
         self.fresh: dict[str, str] = {}
         self.warm_pending = False  # 设置里改了模型：关窗口时再预热，免得每拨一下开关都预热一次
@@ -291,13 +293,17 @@ class SuperAide:
 
     def start(self, announce: bool = False, updated: bool = False, moved: bool = False) -> None:
         failed = self._register_hotkeys(self.cfg)
+        # 第一次用（你自己打开的）：打开新手指引，代替"已在后台运行"的提示
+        tour = announce and not updated and not self.cfg.tour_done
         if failed:
             self.tray.showMessage(app_name(), tr("快捷键 {keys} 注册失败（可能被其它程序占用），可以在设置里换一个。",
                                                  keys=tr("、").join(failed)), QSystemTrayIcon.Warning, 8000)
         elif moved:
             self.tray.showMessage(tr("数据已经移到新位置"), str(paths.DATA), QSystemTrayIcon.Information, 6000)
-        elif announce or updated:
+        elif (announce or updated) and not tour:
             self.announce(updated=updated)
+        if tour:
+            self.open_tour()
         threading.Thread(target=relocate.cleanup, name="relocate-cleanup", daemon=True).start()
         try:
             autostart.upgrade()
@@ -363,6 +369,25 @@ class SuperAide:
         if self.history is None:
             self.history = HistoryWindow(self.ctrl.theme)
         self.history.open()
+
+    # ---------- 新手指引 ----------
+
+    def open_tour(self) -> None:
+        if self.tour is None:
+            self.tour = TourWindow(self)
+        self.tour.open()
+
+    def tour_closed(self, how: str) -> None:
+        """看完、中途关掉、欢迎页上跳过：以后都不再自动打开。跳过的告诉一声在哪能再打开。"""
+        if not self.cfg.tour_done:
+            self.cfg.tour_done = True
+            config.save(self.cfg)
+        if how == "skipped":
+            self._notice_target = ""
+            self.tray.showMessage(tr("{app}已在后台运行", app=app_name()),
+                                  tr("按 {ask} 问答，{act} 操作。新手指引在托盘菜单里，随时能再打开。",
+                                     ask=self.cfg.hotkey_ask, act=self.cfg.hotkey_act),
+                                  QSystemTrayIcon.Information, 6000)
 
     def _on_use(self) -> None:
         """你在用助手（召唤、提问）：自我改进挑你空下来的时候做事；本地向量模型不在内存里就先加载。"""
@@ -440,6 +465,8 @@ class SuperAide:
         routing_changed = _routing(new) != _routing(old)
         language_changed = new.language != old.language
         evolve_changed = (new.evolve_enabled, new.evolve_contribute) != (old.evolve_enabled, old.evolve_contribute)
+        # 设置页不管这两项，页面里的是打开时的旧值（开着设置时看完了新手指引，别被它改回去）
+        new.setup_done, new.tour_done = old.setup_done, old.tour_done
         old.update_from(new)
         self.collector.blocked = {a.lower() for a in old.blocked_apps}
         if routing_changed:
@@ -452,6 +479,8 @@ class SuperAide:
             self.apply_language()
         self.tray.refresh(old)
         self.ctrl.panel.call("setTheme", self.ctrl.theme())
+        if self.tour is not None and self.tour.is_open():
+            self.tour.refresh()  # 气泡上写的快捷键、主题跟着换
         return errors
 
     def apply_language(self) -> None:
@@ -459,7 +488,7 @@ class SuperAide:
         i18n.set_language(i18n.resolve(self.cfg.language))
         register_identity()  # 系统通知上的名字也跟着换
         self.ctrl.panel.call("setLang", i18n.lang())
-        for window in (self.settings, self.history, self.setup):
+        for window in (self.settings, self.history, self.setup, self.tour):
             if window is not None:
                 window.retitle()
         if self.history is not None and self.history.isVisible():

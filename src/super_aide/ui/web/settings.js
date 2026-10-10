@@ -964,6 +964,7 @@ $('#open-config').addEventListener('click', (e) => {
   call('openConfig');
 });
 $('#open-setup').addEventListener('click', () => call('openSetup'));
+$('#open-tour').addEventListener('click', () => call('openTour'));
 $('#update-btn').addEventListener('click', () => {
   const u = state.update;
   if (u && typeof u === 'object' && u.newer && u.managed && !u.error) applyUpdate();

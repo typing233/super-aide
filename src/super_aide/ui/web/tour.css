@@ -1,0 +1,329 @@
+/* 新手指引。变量、表面沿用 style.css，主按钮、文字按钮沿用 settings.css，这里只放它自己的部分。 */
+
+/* ---------- 欢迎：内容多大窗口多大（宿主摆在屏幕正中），四周 40px 给阴影 ---------- */
+
+[data-layout="welcome"] #root { display: inline-block; padding: 40px; }
+
+.welcome {
+  width: 420px;
+  padding: 30px 36px 26px;
+  border-radius: 20px;
+  background: var(--panel);
+  backdrop-filter: none;
+  text-align: center;
+  animation: welcome-in 380ms var(--ease) both;
+}
+
+@keyframes welcome-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.hero {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 14px;
+}
+
+/* 光点后面一圈慢慢转的光晕 */
+.halo {
+  position: absolute;
+  inset: -22px;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, color-mix(in srgb, var(--ask-b) 34%, transparent), transparent),
+    conic-gradient(from var(--angle), color-mix(in srgb, var(--ask-a) 55%, transparent),
+      transparent 120deg, color-mix(in srgb, var(--ask-b) 55%, transparent) 240deg, transparent 330deg,
+      color-mix(in srgb, var(--ask-a) 55%, transparent));
+  -webkit-mask: radial-gradient(closest-side, #000 55%, transparent);
+  filter: blur(10px);
+  opacity: 0.75;
+  animation: spin 10s linear infinite;
+}
+
+.hero-orb {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--ask-a), var(--ask-b));
+  box-shadow:
+    0 0 0 7px color-mix(in srgb, var(--ask-a) 14%, transparent),
+    0 0 36px color-mix(in srgb, var(--ask-b) 65%, transparent);
+  animation: breathe-soft 3.2s ease-in-out infinite;
+}
+
+@keyframes breathe-soft { 50% { transform: scale(0.88); } }
+
+.kicker {
+  margin: 0;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+
+.w-title {
+  margin: 6px 0 24px;
+  font-size: 23px;
+  line-height: 1.35;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+/* 标题里强调的那几个字用模式色渐变（和官网、宣传片一样） */
+.w-title em {
+  font-style: normal;
+  background: linear-gradient(135deg, var(--ask-a), var(--ask-b));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.w-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.w-actions .primary { height: 40px; min-width: 132px; padding: 0 24px; border-radius: 11px; font-size: 14px; }
+.w-actions .text-btn { height: 40px; padding: 0 16px; font-size: 13.5px; }
+
+.welcome > * { animation: rise 520ms var(--ease) both; }
+.welcome > :nth-child(2) { animation-delay: 60ms; }
+.welcome > :nth-child(3) { animation-delay: 110ms; }
+.welcome > :nth-child(4) { animation-delay: 170ms; }
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 键盘焦点：模式色的一圈，不用系统默认的颜色 */
+button:focus { outline: none; }
+button:focus-visible { outline: 2px solid color-mix(in srgb, var(--a) 60%, transparent); outline-offset: 2px; }
+
+/* ---------- 气泡：像游戏的新手引导，深色、带尾巴，轻轻朝目标那边浮动 ---------- */
+
+/* 四周 18px 给阴影和尾巴（和 tour_window.py 的 PAD 一致） */
+[data-layout="bubble"] #root { display: inline-block; padding: 18px; }
+
+.bubble {
+  --bg: #1B1B1F;
+  --bob-x: 0px;
+  --bob-y: 0px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 8px 0 12px;
+  border-radius: 14px;
+  color: #FFFFFF;
+  background: var(--bg);
+  /* 阴影和光晕都收在 18px 的透明边里（窗口就这么大，伸出去会被切成一个方块） */
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.10),
+    0 0 0 3px color-mix(in srgb, var(--a) 22%, transparent),
+    0 5px 12px rgba(0, 0, 0, 0.32),
+    0 0 12px color-mix(in srgb, var(--b) 30%, transparent);
+  white-space: nowrap;
+  animation: bob 1.6s ease-in-out infinite;
+}
+
+.bubble.pending { visibility: hidden; animation: none; }
+.bubble.pop { animation: pop-in 300ms var(--ease) both, bob 1.6s 300ms ease-in-out infinite; }
+
+[data-tail="up"] { --bob-y: -3px; }
+[data-tail="down"] { --bob-y: 3px; }
+[data-tail="left"] { --bob-x: -3px; }
+[data-tail="right"] { --bob-x: 3px; }
+
+@keyframes bob { 50% { transform: translate(var(--bob-x), var(--bob-y)); } }
+
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(0.86); }
+  60%  { opacity: 1; transform: scale(1.03); }
+  100% { opacity: 1; transform: none; }
+}
+
+.b-main { display: inline-flex; align-items: center; gap: 10px; padding-right: 4px; }
+
+.b-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* 托盘图标的样子：模式色的小圆点 */
+.b-label .orb { width: 11px; height: 11px; }
+
+.b-keys { display: inline-flex; gap: 4px; }
+
+.b-keys kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1;
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.b-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.b-meta[hidden] { display: none; }
+
+.b-dots { display: inline-flex; align-items: center; gap: 4px; }
+
+.b-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.24);
+  transition: width 240ms var(--ease), background 240ms;
+}
+
+.b-dots i.on { width: 14px; background: linear-gradient(90deg, var(--a), var(--b)); }
+
+.b-skip {
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.b-skip:hover { color: #FFFFFF; background: rgba(255, 255, 255, 0.08); }
+.b-done { height: 28px; }
+
+/* 尾巴：一个转了 45° 的小方块，宿主告诉它朝哪、在哪 */
+.b-tail {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--bg);
+  transform: rotate(45deg);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.10);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+[data-tail="up"] .b-tail { top: -6px; left: calc(var(--tail-at, 50%) - 6px); }
+[data-tail="down"] .b-tail { bottom: -6px; left: calc(var(--tail-at, 50%) - 6px); transform: rotate(225deg); }
+[data-tail="left"] .b-tail { left: -6px; top: calc(var(--tail-at, 50%) - 6px); transform: rotate(-45deg); }
+[data-tail="right"] .b-tail { right: -6px; top: calc(var(--tail-at, 50%) - 6px); transform: rotate(135deg); }
+[data-tail="none"] .b-tail, .bubble:not([data-tail]) .b-tail { display: none; }
+
+/* 要你按快捷键（屏幕下方正中）：大一号，按键一明一暗，像游戏里"按 X"的提示 */
+.bubble.big { height: 60px; gap: 14px; padding: 0 10px 0 16px; border-radius: 18px; }
+.bubble.big .b-label { font-size: 17px; }
+.bubble.big .b-keys { gap: 6px; }
+
+.bubble.big .b-keys kbd {
+  min-width: 36px;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 10px;
+  font-size: 14.5px;
+  animation: key-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes key-glow {
+  0%, 100% { box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.14); }
+  50%      { box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 0 0 1px color-mix(in srgb, var(--a) 80%, transparent),
+                         0 0 16px color-mix(in srgb, var(--b) 70%, transparent); }
+}
+
+/* 都会了：一个对勾 */
+.b-check {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--a), var(--b));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--b) 60%, transparent);
+}
+
+.b-check svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: #FFFFFF;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 20;
+  animation: draw-check 420ms 220ms var(--ease) both;
+}
+
+@keyframes draw-check { from { stroke-dashoffset: 20; } to { stroke-dashoffset: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble, .bubble.pop, .bubble.big .b-keys kbd { animation: none !important; }
+}
+
+/* ---------- 浏览器预览（不在桌面宿主里时） ---------- */
+
+body.preview {
+  min-height: 100vh;
+  overflow: auto;
+  background:
+    radial-gradient(circle at 20% 20%, #3b4a6b 0, transparent 45%),
+    radial-gradient(circle at 80% 70%, #6b4a5a 0, transparent 40%),
+    #20232b;
+}
+
+body.preview #root { display: block; width: fit-content; margin: 80px auto 0; }
+
+#demo {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  max-width: 90vw;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+}
+
+#demo button {
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  color: #FFFFFF;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+#demo button:hover { background: rgba(255, 255, 255, 0.12); }

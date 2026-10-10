@@ -59,6 +59,7 @@ def aide(monkeypatch):
     a.evolve = Recorder()
     a.ctrl = SimpleNamespace(panel=Recorder(), theme=lambda: "dark")
     a.settings = None
+    a.tour = None
     a.warm_pending = False
     a.fresh = {}
     a.saved = saved

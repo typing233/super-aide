@@ -61,7 +61,8 @@ def evolve_label(state: dict | None) -> str:
 
 
 class Tray(QSystemTrayIcon):
-    def __init__(self, ctrl, app: QApplication, cfg: Config, open_settings, open_history, open_evolve=None) -> None:
+    def __init__(self, ctrl, app: QApplication, cfg: Config, open_settings, open_history, open_evolve=None,
+                 open_tour=None) -> None:
         super().__init__(orb_icon(), app)
         self.cfg = cfg
         self.evolve_text = ""
@@ -87,6 +88,8 @@ class Tray(QSystemTrayIcon):
         menu.addSeparator()
         self.history_action = add("", open_history)
         self.settings_action = add("", open_settings)
+        self.tour_action = add("", open_tour or (lambda: None))
+        self.tour_action.setVisible(open_tour is not None)
         menu.addSeparator()
         self.quit_action = add("", app.quit)
         self.setContextMenu(menu)
@@ -111,4 +114,5 @@ class Tray(QSystemTrayIcon):
         self.act_action.setText(f"{tr('操作')}\t{cfg.hotkey_act}")
         self.history_action.setText(tr("历史记录"))
         self.settings_action.setText(tr("设置"))
+        self.tour_action.setText(tr("新手指引"))
         self.quit_action.setText(tr("退出"))

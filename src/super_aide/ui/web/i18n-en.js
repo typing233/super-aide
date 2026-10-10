@@ -52,6 +52,14 @@ window.I18N_EN = {
   '贴边步骤': 'Docked steps',
   '切换深浅': 'Toggle theme',
 
+  // 新手指引（tour.html / tour.js）：每一步的键和词由宿主给出（已经是当前语言），这里是欢迎页和按钮
+  '新手指引': 'Getting started',
+  '1 分钟上手': '1-minute tour',
+  '按一个键，说一句话，*就办好。*': 'Press a key. Say one thing. *Done.*',
+  '跳过': 'Skip',
+  '开始': 'Start',
+  '都会了': "You're all set",
+
   // 设置（settings.html / settings.js）
   '超级助手设置': 'Super Aide settings',
   '设置': 'Settings',

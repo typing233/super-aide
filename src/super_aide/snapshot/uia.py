@@ -15,6 +15,7 @@ from concurrent.futures import Future
 from typing import Any
 
 import uiautomation as auto
+import win32gui
 from uiautomation.uiautomation import _AutomationClient
 
 from . import chromium, uiawalk
@@ -445,6 +446,41 @@ def browser_url(worker: UiaWorker, hwnd: int) -> str:
         if uiawalk.cached(e, P_TYPE) == 50004:
             edits.append(e)
     return next((u for u in (_url_like(str(uiawalk.cached(e, P_VALUE) or "")) for e in edits) if u), "")
+
+
+#: 任务栏托盘区的按钮（各个图标、^）；^ 的名字（中文、英文系统）
+TRAY_BUTTON = "SystemTray.NormalButton"
+CHEVRON_NAMES = ("显示隐藏的图标", "Show hidden icons")
+
+
+def tray_icon(worker: UiaWorker, names: tuple[str, ...]) -> tuple[tuple[int, int, int, int], bool] | None:
+    """托盘里我们的图标在哪（物理像素）：在任务栏上看得见就是它；收在 ^ 里就给 ^ 的位置（第二个值为真）；都找不到是 None。
+    系统给的位置（Shell_NotifyIconGetRect）对收起来的图标不对：实测给的是另一个程序的图标。
+    一次跨进程查询把托盘按钮都取回来（一个个走任务栏的控件树要 40 秒，这样约 0.1 秒）。"""
+    hwnd = win32gui.FindWindow("Shell_TrayWnd", None)
+    if not hwnd:
+        return None
+    uia = worker._uia
+    request = uia.CreateCacheRequest()
+    for pid in (P_NAME, P_RECT, 30011):  # 30011：AutomationId
+        request.AddProperty(pid)
+    found = uia.ElementFromHandle(hwnd).FindAllBuildCache(
+        TREE_SCOPE_DESCENDANTS, uia.CreatePropertyCondition(P_CLASS, TRAY_BUTTON), request)
+    chevron = None
+    for i in range(found.Length if found else 0):
+        e = found.GetElement(i)
+        name, r = e.CachedName or "", e.CachedBoundingRectangle
+        if r.right <= r.left:
+            continue
+        rect = (r.left, r.top, r.right, r.bottom)
+        if name.startswith(names) and "·" in name:  # 我们的提示是"超级助手 · Alt+Q 问答 / Alt+W 操作"
+            return rect, False
+        if e.CachedAutomationId == "SystemTrayIcon":
+            if name.startswith(CHEVRON_NAMES):
+                chevron = rect
+            elif chevron is None:
+                chevron = rect  # 别的语言的系统认不出名字：取第一个（最左边的）系统按钮，^ 在托盘区最左边
+    return (chevron, True) if chevron else None
 
 
 def ui_tree(worker: UiaWorker, hwnd: int, max_nodes: int = 400, max_depth: int = 7,

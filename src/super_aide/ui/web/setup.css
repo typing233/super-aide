@@ -133,35 +133,7 @@
   font-size: 12px;
 }
 
-/* ---------- 按钮 ---------- */
-
-.primary {
-  flex: none;
-  height: 34px;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--a), var(--b));
-  font: inherit;
-  font-size: 13.5px;
-  font-weight: 600;
-  color: #FFFFFF;
-  transition: filter 150ms, opacity 150ms;
-}
-
-.primary:hover:not(:disabled) { filter: brightness(1.08); }
-
-.primary:disabled {
-  background: var(--control);
-  color: var(--text-3);
-  font-weight: 400;
-}
-
-.primary.small {
-  height: 28px;
-  padding: 0 12px;
-  font-size: 12.5px;
-}
+/* ---------- 按钮（主按钮 .primary 在 settings.css） ---------- */
 
 .outline {
   border: 1px solid var(--stroke);

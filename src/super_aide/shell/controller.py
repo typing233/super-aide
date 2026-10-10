@@ -39,12 +39,23 @@ EDGE = 20             # 胶囊、结果提示与屏幕边缘的距离
 PARK = QPoint(-30000, -30000)
 PARKED_FRAME_MS = 100  # 网页把收起后的空白画到窗口上，留足这么久
 RECENT_S = 600        # 10 分钟内可以 Ctrl+Enter 接着上次问
+PILL_GUESS = QSize(300, 40)  # 操作胶囊大概多大（网页报上来之前）
 CLIPBOARD_LIMIT = 2000
 NEGATIVE_FOLLOWUP = re.compile(r"不对|错了|没用|不行|没解决|还是不|不是这样|没有用|不管用|失败了"
                                r"|\b(wrong|incorrect|not working|doesn'?t work|didn'?t work|still (not|broken|fail)|no luck)\b",
                                re.IGNORECASE)
 #: Markdown 的编号列表项。回答规范里编号列表只用来写"照着做"的步骤
 STEP_ITEM = re.compile(r"^ {0,3}\d{1,2}[.)] +\S", re.M)
+
+
+def outcome(mode: str, ev: dict) -> str:
+    """一轮结束时告诉新手指引的事：问答答完了；操作做完了、没办成，还是被你按 Esc 停下了。"""
+    if mode != "act":
+        return "answer:ask"
+    if ev.get("stopped"):
+        return "stopped"
+    # 汇报"没完成"、环境没就绪（带修法）的都算没办成，和结果提示的对勾、感叹号一致
+    return "done:act" if ev.get("ok") and not ev.get("hint") and not ev.get("error") else "failed:act"
 
 
 def windows_theme() -> str:
@@ -58,6 +69,9 @@ def windows_theme() -> str:
 
 class Controller(QObject):
     kind_found = Signal(str, str)  # (快照标识, 内容类型)，来自 UIA 线程
+    #: 新手指引看这两个：发生了什么（召唤、发出问题、回答完……写法见 tour.py），面板在屏幕上占着哪一块（收着时为空）
+    happened = Signal(str)
+    placed = Signal(QRect)
 
     def __init__(self, cfg: Config, collector: Collector, hub: EngineHub) -> None:
         super().__init__()
@@ -85,6 +99,9 @@ class Controller(QObject):
         self.ready = False
         self._clip = ("", 0.0)
         self.on_use = lambda: None  # 你在用助手（召唤、提问）：自我改进挑你空下来的时候做事
+        # 新手指引开着时：练习任务替掉推荐问题；它的窗口和我们自己的界面一样不进快照
+        self.suggest: dict[str, str] = {}
+        self.coach_windows: set[int] = set()
 
         b = self.bridge
         b.readied.connect(self._warm_panel)
@@ -165,6 +182,17 @@ class Controller(QObject):
             self.panel.setMask(QRegion(self.pill_area))
         elif not self.panel.mask().isEmpty():
             self.panel.clearMask()
+        self.placed.emit(self._shown_rect(QRect(QPoint(x, y), QSize(w, h))))
+
+    def _shown_rect(self, geometry: QRect) -> QRect:
+        """面板在屏幕上真正占着的那一块（不算四周给阴影留的透明边）。"""
+        inner = geometry.adjusted(MARGIN, MARGIN, -MARGIN, -MARGIN)
+        if self.view != "pill":
+            return inner
+        if self.pill_area.isEmpty():  # 网页还没报上来：胶囊贴在右下角，先按一枚普通大小的胶囊算
+            return QRect(inner.right() - PILL_GUESS.width() + 1, inner.bottom() - PILL_GUESS.height() + 1,
+                         PILL_GUESS.width(), PILL_GUESS.height())
+        return self.pill_area.translated(geometry.topLeft()).adjusted(16, 16, -16, -16)  # 网页报的连着 16px 阴影
 
     def theme(self) -> str:
         return self.cfg.theme if self.cfg.theme in ("light", "dark") else windows_theme()
@@ -199,6 +227,7 @@ class Controller(QObject):
         self.panel.call("park")
         self.overlay.move(PARK)
         self.panel.move(PARK)
+        self.placed.emit(QRect())
 
     # ---------- 召唤 ----------
 
@@ -218,8 +247,8 @@ class Controller(QObject):
         def mark(label: str) -> None:
             marks.append((label, (time.perf_counter() - self.t_hotkey) * 1000))
 
-        own = {self.panel.hwnd(), int(self.overlay.winId())}
-        cap = self.collector.capture(mode, own, prefer_hwnd=self.prev_fg, clipboard=self._recent_clipboard())
+        cap = self.collector.capture(mode, self.own_windows(), prefer_hwnd=self.prev_fg,
+                                     clipboard=self._recent_clipboard())
         mark("采集")
         if cap.foreground is not None:
             self.prev_fg = cap.foreground.hwnd
@@ -245,7 +274,7 @@ class Controller(QObject):
         self.panel.set_no_activate(False)
         recent = bool(self.conv_key) and time.time() - self.conv_time < RECENT_S
         self.panel.call("showInput", {"mode": mode, "theme": self.theme(), "lang": i18n.lang(),
-                                      "placeholders": content.placeholders(self.kind),
+                                      "placeholders": self._placeholders(self.kind),
                                       "answerMax": int(geo.height() * 0.6) - 120, "hasRecent": recent})
         self._place()
         self.panel.show()
@@ -255,6 +284,15 @@ class Controller(QObject):
         mark("输入框")
         log.info("召唤耗时：%s（其中采集：%s）", "，".join(f"{label} {ms:.0f}ms" for label, ms in marks),
                  "，".join(f"{k} {v:.0f}ms" for k, v in cap.timings.items()))
+        self.happened.emit(f"summon:{mode}")
+
+    def own_windows(self) -> set[int]:
+        """我们自己的窗口：快照不截、不读它们（新手指引的窗口也算）。"""
+        return {self.panel.hwnd(), int(self.overlay.winId()), *self.coach_windows}
+
+    def _placeholders(self, kind: str) -> dict[str, str]:
+        """推荐问题：按框里的内容挑；新手指引的练习任务优先。"""
+        return {**content.placeholders(kind), **self.suggest}
 
     def _on_shown(self) -> None:
         if self.t_hotkey is None:
@@ -267,7 +305,7 @@ class Controller(QObject):
     def _on_kind(self, cap_id: str, kind: str) -> None:
         if self.view == "input" and self.snap is not None and str(id(self.snap.cap)) == cap_id:
             self.kind = kind
-            self.panel.call("setPlaceholders", content.placeholders(kind))
+            self.panel.call("setPlaceholders", self._placeholders(kind))
 
     def _on_reselected(self, local: QRect, whole: bool = False) -> None:
         if self.snap is None:
@@ -305,6 +343,7 @@ class Controller(QObject):
         if mode == "act":
             self.signals.resume()
             self.esc.start()
+        self.happened.emit(f"submit:{mode}")
 
     def _on_continue(self, text: str, mode: str) -> None:
         """输入框里 Ctrl+Enter：用这次召唤的画面和选区，接着上次的对话问。"""
@@ -316,8 +355,8 @@ class Controller(QObject):
     def _on_followup(self, text: str, mode: str) -> None:
         if not self.conv_key:
             return
-        own = {self.panel.hwnd(), int(self.overlay.winId())}
-        cap = self.collector.capture(mode, own, prefer_hwnd=self.prev_fg, clipboard=self._recent_clipboard())
+        cap = self.collector.capture(mode, self.own_windows(), prefer_hwnd=self.prev_fg,
+                                     clipboard=self._recent_clipboard())
         self._ask_more(text, mode, self.collector.start(cap))
 
     def _ask_more(self, text: str, mode: str, snap: Snapshot) -> None:
@@ -335,8 +374,10 @@ class Controller(QObject):
             if mode == "act":
                 self.signals.resume()
                 self.esc.start()
+            self.happened.emit(f"submit:{mode}")
         else:
             self.hub.followup(self.conv_key, text, snap)
+            self.happened.emit("followup")
         self.conv_time = time.time()
         self.last_question, self.answer = text, ""
 
@@ -353,6 +394,8 @@ class Controller(QObject):
             if self.conv_mode == "act":
                 self.esc.stop()
         self.panel.call("onEvent", ev)
+        if kind == "done":
+            self.happened.emit(outcome(self.conv_mode, ev))
 
     def _on_esc(self) -> None:
         self.signals.stop()  # 工具服务器正在执行的那一步也立刻停下
@@ -374,6 +417,7 @@ class Controller(QObject):
             # 开机时网页慢，预热那次"显示输入框"可能在预热结束后才报上来，输入框会自己停在屏幕左上角（实测）
             return
         self.view = view
+        self.happened.emit(f"view:{view}")
         if view == "input":  # 输入框里按 Tab 切了模式：定格画面的描边颜色跟着变
             self.panel.view.page().runJavaScript("app.mode()", 0, lambda m: self.overlay.set_mode(m or "ask"))
         else:
@@ -396,6 +440,7 @@ class Controller(QObject):
         first = self.pill_area.isEmpty()
         self.pill_area = QRect(x, y, w, h)
         self.panel.setMask(QRegion(self.pill_area))
+        self.placed.emit(self._shown_rect(self.panel.geometry()))
         if first:
             # 只在胶囊刚出来时撤掉穿透。之后的上报（步骤说明一变就会报）只改形状：这时工具服务器可能正让它穿透着
             self.panel.set_click_through(False)
@@ -412,6 +457,7 @@ class Controller(QObject):
     def dock(self) -> None:
         self.panel.set_no_activate(True)
         self.panel.call("dock")  # 网页切到贴边视图后会通知 setView('dock')，在那里摆位置
+        self.happened.emit("dock")
 
     def _expand_dock(self) -> None:
         if self.view != "dock":
@@ -433,6 +479,7 @@ class Controller(QObject):
         self.panel.show()
         self.panel.raise_()
         self.panel.activateWindow()
+        self.happened.emit("restore")
 
     def dismiss(self) -> None:
         self.signals.clear_guide()  # 收起回答，屏幕上的指引框也收起（贴边的步骤不走这里，指引会留着）
@@ -442,6 +489,7 @@ class Controller(QObject):
         self._return_focus()
         self.panel.set_no_activate(False)
         self.view = None
+        self.happened.emit("dismiss")
 
     def _return_focus(self) -> None:
         """面板停在屏幕外后仍是活动窗口，键盘输入会进到看不见的地方：把焦点还给原来的窗口。"""

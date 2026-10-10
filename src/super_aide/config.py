@@ -75,6 +75,8 @@ class Config:
         enabled=False, models=[ModelEntry(m, True, "max") for m in DSH_MODELS]))
     #: 准备窗口（前置检查）走完过一次。之后只有一个能用的引擎都没有时才会自动打开
     setup_done: bool = False
+    #: 新手指引看完（或跳过）了。第一次用时自动打开一次，之后从托盘菜单、设置里再打开
+    tour_done: bool = False
     #: 自我改进：任务失败、你停下并说明原因、点 👎 或提建议时，分析并改进自己的代码，检查通过后自动更新
     evolve_enabled: bool = True
     #: 社区共建：稳定的改进以你的 GitHub 账号自动提交 PR 到主版本。auto = 能推送主仓库（维护者）时打开，否则关闭
@@ -124,6 +126,8 @@ def from_dict(data: dict) -> Config:
         codex=_engine_from(engines.get("codex", {}), d.codex),
         dsh=_engine_from(engines.get("dsh", {}), d.dsh),
         setup_done=bool(data.get("setup", {}).get("done", d.setup_done)),
+        # 有新手指引之前就准备过的（老用户）不再自动打开：没有这一项时跟着"准备过没有"走
+        tour_done=bool(data.get("tour", {}).get("done", data.get("setup", {}).get("done", d.tour_done))),
         evolve_enabled=bool(data.get("evolve", {}).get("enabled", d.evolve_enabled)),
         evolve_contribute=_choice(data.get("evolve", {}).get("contribute"), ("auto", "on", "off"), d.evolve_contribute),
     )
@@ -142,6 +146,7 @@ def to_dict(cfg: Config) -> dict:
             for name, eng in (("claude", cfg.claude), ("codex", cfg.codex), ("dsh", cfg.dsh))
         },
         "setup": {"done": cfg.setup_done},
+        "tour": {"done": cfg.tour_done},
         "evolve": {"enabled": cfg.evolve_enabled, "contribute": cfg.evolve_contribute},
     }
 

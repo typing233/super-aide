@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark" data-mode="ask" data-layout="welcome">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n>新手指引</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="tour.css">
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+</head>
+<body>
+  <main id="root">
+
+    <!-- 欢迎：屏幕正中。回车开始，Esc 跳过 -->
+    <section id="welcome" class="surface welcome" hidden>
+      <div class="hero" aria-hidden="true"><span class="halo"></span><span class="hero-orb"></span></div>
+      <p class="kicker" data-i18n>1 分钟上手</p>
+      <h1 class="w-title" id="w-title"></h1>
+      <div class="w-actions">
+        <button class="text-btn" id="w-skip" data-i18n>跳过</button>
+        <button class="primary" id="w-start" data-i18n>开始</button>
+      </div>
+    </section>
+
+    <!-- 气泡：贴在要你看的东西旁边，尾巴指着它；只写要按的键和一两个词 -->
+    <section id="bubble" class="bubble pending" hidden>
+      <span class="b-main" id="b-main"></span>
+      <span class="b-meta" id="b-meta">
+        <span class="b-dots" id="b-dots"></span>
+        <button class="b-skip" id="b-skip" data-i18n>跳过</button>
+        <button class="primary small b-done" id="b-done" data-i18n>完成</button>
+      </span>
+      <i class="b-tail" aria-hidden="true"></i>
+    </section>
+
+  </main>
+
+  <!-- 仅在普通浏览器里预览时出现 -->
+  <nav id="demo" hidden></nav>
+
+  <script src="i18n-en.js"></script>
+  <script src="i18n.js"></script>
+  <script src="tour.js"></script>
+</body>
+</html>

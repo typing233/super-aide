@@ -116,6 +116,7 @@ A custom endpoint is written into each tool's own config (with a `*.super-aide.b
 
 - **Open**: "Super Aide" in the Start menu. It has no main window and lives in the tray; when you open it, a notification says so. If you checked "Start with Windows" during install, it's ready after every boot.
 - `Alt+Q` to ask, `Alt+W` to act (changeable in Settings). The input box only appears when you press a hotkey.
+- **Getting started**: shows up the first time you open it, a 1-minute game-style walkthrough. A small bubble points at the real interface with the key to press and a word or two, and moves on once you've actually done it. Reopen it anytime from the tray menu or Settings → General.
 - **History** (tray menu): every question and answer, searchable. Hover an item and click the trash icon to delete it; `Ctrl`/`Shift`-click (or `Ctrl+A`) to select several, then `Delete`. You can undo for a few seconds.
 - **Settings**: hotkeys, theme, **language** (follow system / 中文 / English), apps it never looks at, which models each engine may use, autostart.
 - **Updates**: Settings → General → Version. It checks when you open Settings; click Update and Super Aide quits, the installer installs the new version and reopens it. Settings and history are kept.

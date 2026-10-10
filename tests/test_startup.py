@@ -40,10 +40,11 @@ def fake_controller(monkeypatch):
     timers = []
     monkeypatch.setattr(ctl.QTimer, "singleShot", lambda ms, fn: timers.append(fn))
     screen = QRect(0, 0, 1920, 1080)
+    quiet = SimpleNamespace(emit=lambda *args: None)
     c = SimpleNamespace(panel=FakePanel(), overlay=FakeOverlay(), collector=SimpleNamespace(warm=lambda: None),
-                        content=QSize(680, 136), view=None, ready=False, prev_fg=0,
-                        _screen=lambda: (screen, screen, None), theme=lambda: "dark")
-    for name in ("_place", "_park", "_on_view", "_on_sized"):
+                        content=QSize(680, 136), view=None, ready=False, prev_fg=0, pill_area=QRect(),
+                        happened=quiet, placed=quiet, _screen=lambda: (screen, screen, None), theme=lambda: "dark")
+    for name in ("_place", "_park", "_on_view", "_on_sized", "_shown_rect"):
         setattr(c, name, getattr(ctl.Controller, name).__get__(c))
     return c, timers, screen
 

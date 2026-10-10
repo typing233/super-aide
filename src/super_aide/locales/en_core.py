@@ -26,6 +26,20 @@ EN = {
     "设置有误：{error}": "Invalid settings: {error}",
     "已按 Esc 停止": "Stopped with Esc",
 
+    # 新手指引（tour.py：每一步只写要按的键和一两个词）
+    "新手指引": "Getting started",
+    "按 {ask} 问答，{act} 操作。新手指引在托盘菜单里，随时能再打开。":
+        "Press {ask} to ask, {act} to act. Getting started is in the tray menu whenever you want it.",
+    "提问": "Ask",
+    "发送": "Send",
+    "关闭": "Close",
+    "让它动手": "Let it act",
+    "开始": "Start",
+    "随时停下": "Stop anytime",
+    "右键 ● 打开设置": "Right-click ● for settings",
+    "点 ^，再右键 ●": "Click ^, then right-click ●",
+    "打开计算器": "Open Calculator",
+
     # 快捷键
     "快捷键不能为空": "The hotkey can't be empty",
     "需要至少一个修饰键（Ctrl / Alt / Shift / Win）": "Needs at least one modifier (Ctrl / Alt / Shift / Win)",
