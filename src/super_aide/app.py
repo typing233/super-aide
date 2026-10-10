@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from . import __version__, autostart, config, history, hotkeys, i18n, paths, relocate, update
+from .launch import SINGLETON, WAKE_EVENT
 from .engines import prompts
 from .engines.hub import EngineHub
 from .evolve.manager import EvolveManager, wait_for_apply, write_health
@@ -34,7 +35,6 @@ from .snapshot.uia import UiaWorker
 
 log = logging.getLogger("super_aide")
 ERROR_ALREADY_EXISTS = 183
-WAKE_EVENT = "Local\\SuperAideWake"  # 再打开一次时，叫醒正在运行的那个
 EVENT_MODIFY_STATE, INFINITE, WAIT_OBJECT_0 = 0x0002, 0xFFFFFFFF, 0
 kernel32 = ctypes.windll.kernel32
 kernel32.CreateEventW.restype = ctypes.c_void_p
@@ -47,6 +47,7 @@ kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
 kernel32.WaitForSingleObject.restype = ctypes.c_uint
 CREATE_NO_WINDOW, CREATE_NEW_CONSOLE, DETACHED_PROCESS = 0x08000000, 0x00000010, 0x00000008
 CREATE_NEW_PROCESS_GROUP, SYNCHRONIZE = 0x00000200, 0x00100000
+PRUNE_EVERY_MS = 6 * 3600 * 1000  # 会话文件夹的清理：启动时一次，之后每 6 小时（开机自启后常常连着跑好多天）
 #: 自己重启自己（换了数据位置）：新的进程带上旧进程的编号，先等它退出，单实例检查才过得去
 RESTART_FLAG = "--restart-after"
 kernel32.OpenProcess.restype = ctypes.c_void_p
@@ -187,7 +188,7 @@ def _flag(name: str) -> str:
 
 
 def _single_instance() -> bool:
-    ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\SuperAideSingleton")
+    ctypes.windll.kernel32.CreateMutexW(None, False, SINGLETON)
     return ctypes.windll.kernel32.GetLastError() != ERROR_ALREADY_EXISTS
 
 
@@ -283,7 +284,10 @@ class SuperAide:
         self.hub.warm_up()
         self.hub.discover_models()
         self.evolve.start(*(_flag(name) for name in EVOLVE_FLAGS))
-        threading.Thread(target=self._prune_sessions, name="prune", daemon=True).start()
+        self._prune_later()
+        self.prune_timer = QTimer(self.app)
+        self.prune_timer.timeout.connect(self._prune_later)
+        self.prune_timer.start(PRUNE_EVERY_MS)
         log.info("Super Aide 已启动：%s 问答 / %s 操作", self.cfg.hotkey_ask, self.cfg.hotkey_act)
 
     def announce(self, again: bool = False, updated: bool = False) -> None:
@@ -324,11 +328,14 @@ class SuperAide:
         self.hub.shutdown()
         self.collector.close()
 
+    def _prune_later(self) -> None:
+        threading.Thread(target=self._prune_sessions, name="prune", daemon=True).start()
+
     @staticmethod
     def _prune_sessions() -> None:
         cleaned = history.prune()
         if cleaned:
-            log.info("清理了 %d 个 %d 天前的会话（只留下问答记录）", cleaned, history.KEEP_DAYS)
+            log.info("清理了 %d 个会话文件夹（%d 天前的只留下问答记录，召唤了没提问的整个删掉）", cleaned, history.KEEP_DAYS)
 
     def open_history(self) -> None:
         if self.history is None:

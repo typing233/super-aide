@@ -50,7 +50,7 @@ Releases = "https://github.com/typing233/super-aide/releases"
 
 # 不带控制台窗口的启动器（安装后是 super-aide.exe）
 [project.gui-scripts]
-super-aide = "super_aide.app:main"
+super-aide = "super_aide.launch:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

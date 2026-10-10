@@ -251,7 +251,7 @@ class CodexSession:
                         label = tr("正在操作界面…")
                     else:
                         label = tr("正在使用 {name}…", name=item.server)
-                    yield Event("status", label)
+                    yield Event("status", label, {"tool": f"mcp__{item.server}__{item.tool}"})
             elif isinstance(p, AgentMessageDeltaNotification):
                 if p.item_id in commentary:
                     continue

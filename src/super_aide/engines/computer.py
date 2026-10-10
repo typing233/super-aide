@@ -75,6 +75,11 @@ ACT_VERBS = {"click": "正在点击", "double_click": "正在双击", "right_cli
              "wait": "正在等待"}
 
 
+def looks_at_screen(tool: str) -> bool:
+    """这个工具要看实时的屏幕（看窗口、圈位置、读界面……）。后台对比的会话没有这些工具，用过它们的问答不比。"""
+    return tool.startswith(f"mcp__{SERVER_NAME}__")
+
+
 def status(tool: str, args: dict | None) -> str:
     """工具调用 → 界面上的一行进度（两个引擎共用）。tool 可以带 mcp__computer__ 前缀。"""
     tool = tool.rsplit("__", 1)[-1]

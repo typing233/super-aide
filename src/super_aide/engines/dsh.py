@@ -525,7 +525,7 @@ class DshSession:
         if kind == "tool_call":
             self.current = None
             name = str(update.get("title") or update.get("kind") or "")
-            return [Event("retract"), Event("status", tool_status(name, update.get("rawInput") or {}))]
+            return [Event("retract"), Event("status", tool_status(name, update.get("rawInput") or {}), {"tool": name})]
         return []
 
     async def interrupt(self) -> None:

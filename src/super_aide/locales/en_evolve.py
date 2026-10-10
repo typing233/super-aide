@@ -52,6 +52,7 @@ EN = {
     # 设置里的操作
     "没有待生效的改进": "No improvement is waiting to be applied",
     "只能撤销最近一次改进": "Only the latest improvement can be undone",
+    "装过新版本以后，这次改进不能再单独撤销": "A newer version has been installed since, so this improvement can no longer be undone on its own",
     "从源码运行时不能自动换包：用 install.cmd 重新安装": "Can't swap packages when running from source: reinstall with install.cmd",
     "找不到要装的包": "The package to install is missing",
     "没能开始：{error}": "Couldn't start: {error}",

@@ -73,7 +73,8 @@ def worth_learning(turns: list[dict], negative: bool = False) -> str:
     for t in turns:
         if REMEMBER.search(str(t.get("question", ""))):
             return "用户要求以后照着做"
-        if t.get("seconds", 0) >= LONG_TURN_S or t.get("tools", 0) >= MANY_TOOLS:
+        # 只算办完了的：你中途停下的（或者服务出错断了的）过程不完整，拿去总结容易学出错的经验
+        if t.get("ok", True) and (t.get("seconds", 0) >= LONG_TURN_S or t.get("tools", 0) >= MANY_TOOLS):
             return "绕了很久才办完"
     return ""
 

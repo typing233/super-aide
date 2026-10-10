@@ -465,11 +465,3 @@ def ui_tree(worker: UiaWorker, hwnd: int, max_nodes: int = 400, max_depth: int =
         name = (ctrl.Name or "").replace("\n", " ")[:80]
         lines.append(f"{'  ' * depth}[{kind}] {name}".rstrip())
     return "\n".join(lines)
-
-
-def text_at(worker: UiaWorker, x: int, y: int) -> str:
-    """屏幕某一点上控件的文字，用来给重新框选的区域判断内容类型。"""
-    ctrl = auto.ControlFromPoint(x, y)
-    if ctrl is None:
-        return ""
-    return "\n".join(t for t in (ctrl.Name, _value(ctrl)) if t)[:4000]

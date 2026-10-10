@@ -198,8 +198,14 @@ READ_ONLY_DENIED = ("问答模式只能读取信息、运行只读命令。需�
                     "并提示他在追问框按 Tab 切到操作模式让你来做。")
 
 
+#: 会话要求按 JSON Schema 交结论（output_format）时，CLI 让模型调这个工具交出来：只是交结论，不改任何东西。
+#: 只读会话（自我改进的初筛、复核，审社区 PR）原来被下面的钩子挡掉它，结论交不上，只能指望模型再把 JSON 写进正文
+#: （2026-10-10 实测：复核两次交"不通过"都被挡，最后一句话里没有 JSON，白花一轮重新复核）
+OUTPUT_TOOL = "StructuredOutput"
+
+
 def _read_only_allows(tool_name: str, tool_input: dict) -> bool:
-    if tool_name in READ_ONLY_TOOLS or tool_name == "Skill":  # 加载技能只是读它的说明
+    if tool_name in READ_ONLY_TOOLS or tool_name in ("Skill", OUTPUT_TOOL):  # 加载技能只是读它的说明
         return True
     if tool_name in computer.ASK_TOOLS or tool_name == MEMORY_TOOL:  # 看窗口、圈位置、回想经验：不改动任何东西
         return True
@@ -375,7 +381,7 @@ class ClaudeSession:
             elif isinstance(msg, AssistantMessage) and not msg.parent_tool_use_id:
                 for block in msg.content:
                     if isinstance(block, ToolUseBlock):
-                        yield Event("status", tool_status(block.name, block.input))
+                        yield Event("status", tool_status(block.name, block.input), {"tool": block.name})
             elif isinstance(msg, ResultMessage):
                 self.session_id = msg.session_id
                 yield Event("done", data={

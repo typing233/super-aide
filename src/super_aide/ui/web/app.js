@@ -119,7 +119,7 @@ const caret = el('span', 'caret');
 function renderMarkdown(target, markdown, streaming) {
   target.innerHTML = window.marked ? marked.parse(markdown) : `<p>${escapeHtml(markdown)}</p>`;
   for (const pre of target.querySelectorAll('pre')) {
-    const code = pre.innerText;
+    const code = pre.innerText.replace(/\s+$/, ''); // 不带结尾的换行：粘到终端里不会直接执行
     const btn = el('button', 'icon-btn copy');
     btn.title = I18N.t('复制');
     btn.innerHTML = $('#copy-all').innerHTML;
@@ -324,12 +324,16 @@ function setStatus(text, isError = false) {
   line.innerHTML = text ? `<span class="${isError ? 'error-text' : 'shimmer'}">${escapeHtml(text)}</span>` : '';
 }
 
+function showRoute(ev) {
+  $('#question').title = ev ? I18N.t('由 {engine} · {model} · 思考强度 {effort} 回答',
+    { engine: ENGINE_NAME[ev.engine] || ev.engine, model: ev.model, effort: ev.effort }) : '';
+}
+
 function onEvent(ev) {
   switch (ev.type) {
     case 'route': {
       live.route = ev;
-      $('#question').title = I18N.t('由 {engine} · {model} · 思考强度 {effort} 回答',
-        { engine: ENGINE_NAME[ev.engine] || ev.engine, model: ev.model, effort: ev.effort });
+      showRoute(ev);
       break;
     }
     case 'status': {
@@ -371,8 +375,12 @@ function onEvent(ev) {
   }
 }
 
+// 结果提示的一句话：汇报的第一行，去掉 Markdown 记号（`代码`、**加粗**、[链接](地址)）和"已完成："这个前缀（对勾已经说明了）。
+// 开头只去掉列表、引用、标题的记号（"1. "这种编号也算）；"3 个文件已删除"开头的数字是正文，原来被当成编号删掉了
 function summaryLine(markdown) {
-  const line = markdown.split('\n').map((s) => s.replace(/^[#>*\-\d.\s`]+/, '').trim()).find(Boolean);
+  const line = markdown.split('\n').map((s) => s.replace(/^(?:[#>*\-\s`]|\d+[.)](?=\s|$))+/, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|`/g, '')
+    .replace(/^(已完成|done)\s*[:：]\s*/i, '').trim()).find(Boolean);
   return line ? (line.length > 40 ? `${line.slice(0, 39)}…` : line) : '';
 }
 
@@ -479,8 +487,12 @@ function followup(raw) {
   if (!text) return;
   if (bridge) {
     bridge.followup(text, state.mode);
-    if (state.mode === 'ask') startCard(text);
-    else startPill(text);
+    if (state.mode === 'ask') {
+      startCard(text);
+      showRoute(live.route); // 接着问还是同一个对话：悬停问题照样看得到由谁回答（换了配置会再报上来）
+    } else {
+      startPill(text);
+    }
   } else if (state.mode === 'ask') {
     mockAnswer(text);
   } else {
@@ -590,6 +602,7 @@ const app = {
     if (live.question) {
       show('card');
       renderMarkdown($('#answer'), live.draft, !live.done);
+      $('#followup').focus(); // 找回来就能接着问，不用先点一下追问框
     }
   },
   mode() { return state.mode; },

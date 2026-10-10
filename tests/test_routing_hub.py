@@ -201,3 +201,22 @@ def test_codex_model_metadata_reaches_the_router():
     assert found[0]["found"] == {"codex": ["gpt-6-luna"]}
     assert updates == [("codex", {"gpt-6-luna": {"efforts": ["low", "medium"], "default": "medium",
                                                  "desc": "Fast and affordable model for easier tasks.", "upgrade": ""}})]
+
+
+def test_answers_that_looked_at_the_live_screen_are_not_dueled():
+    """后台对比的会话没有看实时界面、圈位置的工具：用过它们的问答比出来是工具差，不是配置差。"""
+    created = []
+    hub = fake_hub(FakeRouter(candidate=decision("claude-sonnet-5-5", "low")),
+                   loop=SimpleNamespace(create_task=lambda coro: (created.append(coro), coro.close())),
+                   _duel=lambda *a: hub_module.asyncio.sleep(0))
+    c = conv()
+    c.first, c.live_ui = ("记事本的另存为在哪？圈给我看", "消息", []), True
+    EngineHub._after_first_turn(hub, c, {"ok": True, "seconds": 20}, "在左上角的文件菜单里（框 1）")
+    assert created == [] and ("count",) not in hub.router.calls
+
+
+def test_screen_tools_mark_the_conversation():
+    from super_aide.engines import computer
+
+    assert computer.looks_at_screen("mcp__computer__point") and computer.looks_at_screen("mcp__computer__observe_window")
+    assert not computer.looks_at_screen("Read") and not computer.looks_at_screen("mcp__memory__recall")

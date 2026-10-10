@@ -337,7 +337,7 @@ class Session:
         img.save(path, "PNG", compress_level=1)
         return path
 
-    def _window_at_selection(self) -> win32.WindowInfo | None:
+    def window_at_selection(self) -> win32.WindowInfo | None:
         """框选区域中心所在的窗口（按 Z 序从上往下找第一个盖住中心的）。"""
         left, top, right, bottom = self.selection
         cx, cy = (left + right) // 2, (top + bottom) // 2
@@ -352,7 +352,7 @@ class Session:
         已经选中了文字、或者框的是整个屏幕时不用读。"""
         if crop is None or self.selection_source in ("text", "screen"):
             return "", ""
-        target = self._window_at_selection()
+        target = self.window_at_selection()
         if target is None or self.c.is_blocked(target):
             return "", ""
         ui = self.c.uia_fast.submit(uia.text_in_rect, target.hwnd, self.selection)

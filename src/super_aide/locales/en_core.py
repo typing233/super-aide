@@ -121,6 +121,9 @@ EN = {
         "Engine sign-in failed. Check the Claude Code / Codex login or endpoint settings.",
     "引擎被限流了，稍后再试。": "The engine is rate-limited. Try again later.",
     "引擎响应超时。": "The engine timed out.",
+    "模型服务暂时不可用，稍后再试。": "The model service is temporarily unavailable. Try again later.",
+    "已停止": "Stopped",
+    "连不上模型服务，请检查网络或代理。": "Can't reach the model service. Check your network or proxy.",
 
     # 推荐问题（输入框里的提示）
     "这个报错是什么原因？": "What's causing this error?",

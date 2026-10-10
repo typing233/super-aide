@@ -69,6 +69,7 @@ class Hub:
     interrupt, is_busy = EngineHub.interrupt, EngineHub.is_busy
     _first_turn, _open, _turn = EngineHub._first_turn, EngineHub._open, EngineHub._turn
     _stop, _drop_sessions = EngineHub._stop, EngineHub._drop_sessions
+    _avoid_after, _hand_over = EngineHub._avoid_after, EngineHub._hand_over
     _ask_to_stop = EngineHub.__dict__["_ask_to_stop"]
 
     def __init__(self, engines):

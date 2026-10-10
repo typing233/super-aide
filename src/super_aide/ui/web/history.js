@@ -102,7 +102,7 @@ function renderList() {
     row.dataset.id = item.id;
     row.append(el('span', 'dot'), el('span', 'q', item.question), el('span', 'time', timeLabel(item.started)),
       el('span', 'p', item.ok === false && !/^(没完成|未完成|暂未|未能|没能)/.test(item.preview)
-        ? I18N.t('没完成 · {preview}', { preview: item.preview }) : item.preview));
+        ? (item.preview ? I18N.t('没完成 · {preview}', { preview: item.preview }) : I18N.t('没完成')) : item.preview));
     row.title = item.question;
     row.addEventListener('click', () => select(item.id));
     list.append(row);

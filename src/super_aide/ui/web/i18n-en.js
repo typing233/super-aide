@@ -197,6 +197,7 @@ window.I18N_EN = {
   '还没有记录': 'No history yet',
   '还没有记录。用快捷键提一个问题，回答会出现在这里。': 'No history yet. Ask something with your hotkey and the answer will show up here.',
   '没完成 · {preview}': 'Not done · {preview}',
+  '没完成': 'Not done',
   '已复制': 'Copied',
   '打开会话文件夹': 'Open conversation folder',
 

@@ -14,12 +14,17 @@ import time
 from pathlib import Path
 
 from . import paths
+from .engines.base import friendly_text
+from .i18n import tr
 
 log = logging.getLogger(__name__)
 
 FILE = "conversation.json"
 SESSION_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{4}$")
 KEEP_DAYS = 7
+#: 召唤了没提问（没有问答记录）的会话文件夹留这么久就删：截图和窗口文字一点用都没有了（每个约 1～2MB）。
+#: 不能太短：首问的问答记录要等这一轮答完才写，长的操作要跑好一阵
+UNUSED_HOURS = 12
 
 
 def save(folder: Path, conversation: dict) -> None:
@@ -50,7 +55,7 @@ def summaries(query: str = "", limit: int = 300) -> list[dict]:
             continue
         first, last = turns[0], turns[-1]
         out.append({"id": folder.name, "started": conv.get("started", ""), "mode": conv.get("mode", "ask"),
-                    "question": first.get("question", ""), "preview": _preview(last.get("answer", "")),
+                    "question": first.get("question", ""), "preview": _preview(last.get("answer", "")) or _preview(_shown_error(last)),
                     "ok": last.get("ok", True), "turns": len(turns)})
         if len(out) >= limit:
             break
@@ -63,7 +68,18 @@ def load(session_id: str) -> dict | None:
     conv = _read(paths.SESSIONS / session_id)
     if conv is not None:
         conv["id"] = session_id
+        for turn in conv.get("turns", []):
+            if turn.get("error") or turn.get("reason") == "interrupted":
+                turn["error"] = _shown_error(turn)
     return conv
+
+
+def _shown_error(turn: dict) -> str:
+    """给人看的出错原因：引擎原始的接口报错（429 之类的英文）换成一句人话，和回答卡片上一样。记录里留原文。"""
+    if turn.get("reason") == "interrupted":  # 你按 Esc 停下的：引擎报上来的只是一串内部诊断（[ede_diagnostic] …）
+        return tr("已停止")
+    error = str(turn.get("error") or "")
+    return error if turn.get("reason") == "reported" else friendly_text(error)
 
 
 def folder(session_id: str) -> Path | None:
@@ -73,27 +89,32 @@ def folder(session_id: str) -> Path | None:
 
 def _preview(markdown: str) -> str:
     for line in markdown.splitlines():
-        text = re.sub(r"^[#>*\-\d.)\s`]+", "", line).replace("**", "").replace("`", "").strip()
+        # 开头只去掉列表、引用、标题的记号；"3 个文件已删除"开头的数字是正文，不是编号
+        text = re.sub(r"^(?:[#>*\-\s`]|\d+[.)](?=\s|$))+", "", line).replace("**", "").replace("`", "").strip()
         if text:
             return text[:80]
     return ""
 
 
-def prune(keep_days: int = KEEP_DAYS) -> int:
-    """过期的会话文件夹：有问答的只留 conversation.json，没有的整个删掉。返回清理了几个。"""
+def prune(keep_days: int = KEEP_DAYS, unused_hours: float = UNUSED_HOURS) -> int:
+    """过期的会话文件夹：有问答的 keep_days 天后只留 conversation.json；没有问答的（召唤了没提问）
+    unused_hours 小时后整个删掉。返回清理了几个。"""
     if not paths.SESSIONS.exists():
         return 0
-    cutoff = time.time() - keep_days * 86400
+    now = time.time()
+    cutoff, unused_cutoff = now - keep_days * 86400, now - unused_hours * 3600
     cleaned = 0
     for folder in paths.SESSIONS.iterdir():
         if not (folder.is_dir() and SESSION_ID.match(folder.name)):
             continue
         try:
-            if folder.stat().st_mtime > cutoff:
-                continue
+            mtime = folder.stat().st_mtime
             if not (folder / FILE).exists():
-                shutil.rmtree(folder)
-                cleaned += 1
+                if mtime <= unused_cutoff:
+                    shutil.rmtree(folder)
+                    cleaned += 1
+                continue
+            if mtime > cutoff:
                 continue
             extra = [p for p in folder.iterdir() if p.name != FILE]
             for p in extra:

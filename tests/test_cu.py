@@ -107,3 +107,22 @@ def test_status_lines():
     assert computer.status("act", {"actions": [{"do": "type", "text": "hi"}]}) == "正在输入…"
     assert computer.status("act", {"actions": [{"do": "click"}, {"do": "key", "keys": "enter"}]}) == "正在点击（共 2 步）…"
     assert computer.status("browser", {"command": "go", "value": "https://modelscope.cn"}) == "正在打开 https://modelscope.cn…"
+
+
+def test_guide_labels_stay_on_screen_at_the_edges():
+    """框贴着屏幕上沿、右沿时（窗口右上角的关闭按钮、浏览器标签页），编号标签原来整个画到屏幕外。"""
+    from super_aide.cu import guide
+
+    def label_pixels(target, scale=1.25):
+        (bx0, by0, bx1, by1), _ = target
+        x0, y0 = bx0 - guide.PAD - round(220 * scale), by0 - guide.PAD - round(40 * scale)
+        size = (bx1 + guide.PAD + round(220 * scale) - x0, by1 + guide.PAD + round(40 * scale) - y0)
+        img = guide.render([target], (x0, y0), size, scale, screen=lambda r: (0, 0, 1920, 1080))
+        px = img.load()
+        return [(x + x0, y + y0) for y in range(img.height) for x in range(img.width)
+                if px[x, y][3] > 200 and px[x, y][0] > 120 and px[x, y][2] > 200 and px[x, y][1] < 130]
+
+    corner = label_pixels(((1874, 0, 1920, 40), "点这里关闭窗口"))
+    assert corner and all(0 <= x <= 1920 and 40 < y < 1080 for x, y in corner)  # 挪到框下面、往左收
+    menu = label_pixels(((207, 230, 260, 262), "文件"))
+    assert menu and all(y < 230 for _, y in menu)  # 有地方时照旧在框上面

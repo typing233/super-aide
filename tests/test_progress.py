@@ -63,7 +63,7 @@ def test_thinking_is_not_a_step():
     noop = lambda *a, **k: None  # noqa: E731
     hub = SimpleNamespace(_emit=noop, _check_outcome=noop, _watch_outcome=noop, _learn_from_turn=noop,
                           _after_first_turn=noop, _lessons_used=noop, _schedule_learning=noop, _schedule_evolve=noop,
-                          _crashed=noop, _drop_sessions=noop,
+                          _crashed=noop, _drop_sessions=noop, _avoid_after=noop,
                           _save_history=lambda conv, done, answer, trace=None: saved.update(trace=trace))
     conv = Conversation(key="k", mode="ask", task=Task("ask", "q", "text"), session=Session())
     asyncio.run(EngineHub._turn(hub, conv, "q", []))

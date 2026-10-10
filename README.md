@@ -130,7 +130,7 @@ A custom endpoint is written into each tool's own config (with a `*.super-aide.b
 
 ## Privacy
 
-Super Aide's own data lives in `~/.super_aide/`. Screen content is only sent to the model service you configured. Apps on the "never look at" list are blacked out in screenshots and their text isn't read.
+Super Aide's own data lives in `~/.super_aide/`. Session folders keep only the Q&A after 7 days; a summon closed without a question is deleted after 12 hours. Screen content is only sent to the model service you configured. Apps on the "never look at" list are blacked out in screenshots and their text isn't read.
 
 ## Uninstall
 

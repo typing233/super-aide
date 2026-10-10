@@ -56,9 +56,16 @@ def test_prune_keeps_only_the_conversation(sessions):
     (bare / "screen.jpg").write_bytes(b"x")
     os.utime(bare, (time.time() - 30 * 86400,) * 2)
     recent = make(sessions, "20261008-073708-097e", "新问题", "新回答")
-    assert history.prune(keep_days=7) == 2
+    unused = sessions / "20261010-110628-010c"  # 今天上午召唤了没提问：截图和窗口文字没用了，不用等 7 天
+    unused.mkdir()
+    (unused / "screen.jpg").write_bytes(b"x")
+    os.utime(unused, (time.time() - 13 * 3600,) * 2)
+    asking = sessions / "20261010-120000-0003"  # 刚提问、还在答（问答记录答完才写）：不能删
+    asking.mkdir()
+    (asking / "screen.jpg").write_bytes(b"x")
+    assert history.prune(keep_days=7) == 3
     assert sorted(p.name for p in old.iterdir()) == [history.FILE]
-    assert not bare.exists()
+    assert not bare.exists() and not unused.exists() and (asking / "screen.jpg").exists()
     assert (recent / "screen.jpg").exists()
     assert history.load(old.name)["turns"][0]["answer"] == "旧回答"
 
@@ -76,3 +83,26 @@ def test_hub_records_each_turn(sessions):
     assert [t["question"] for t in saved["turns"]] == ["帮我修好它", "那现在呢"]
     assert saved["turns"][0]["error"].startswith("浏览器操作还没接通")
     assert saved["turns"][1]["ok"] is True and saved["mode"] == "act"
+
+
+def test_failures_without_an_answer_show_the_reason_in_plain_words(sessions):
+    folder = sessions / "20261010-095904-ab12"
+    folder.mkdir()
+    raw = "exceeded retry limit, last status: 429 Too Many Requests"
+    history.save(folder, {"mode": "act", "started": "2026-10-10T09:59:04", "foreground": "Notepad.exe",
+                          "turns": [{"question": "新建 e.txt", "answer": "", "ok": False, "error": raw}]})
+    item = history.summaries()[0]
+    assert item["preview"] == "引擎被限流了，稍后再试。"   # 不再是一个空的"没完成 ·"
+    assert history.load(folder.name)["turns"][0]["error"] == "引擎被限流了，稍后再试。"
+    assert raw in (folder / "conversation.json").read_text(encoding="utf-8")  # 记录里还是原文
+
+
+def test_stopped_turns_say_stopped_not_the_engine_diagnostic(sessions):
+    folder = sessions / "20261010-104248-3ffa"
+    folder.mkdir()
+    diag = "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"
+    history.save(folder, {"mode": "act", "started": "2026-10-10T10:42:48", "foreground": "Notepad.exe",
+                          "turns": [{"question": "统计 dll", "answer": "", "ok": False, "reason": "interrupted",
+                                     "error": diag}]})
+    assert history.summaries()[0]["preview"] == "已停止"
+    assert history.load(folder.name)["turns"][0]["error"] == "已停止"

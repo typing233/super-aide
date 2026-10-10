@@ -269,7 +269,7 @@ class Controller(QObject):
             self.kind = kind
             self.panel.call("setPlaceholders", content.placeholders(kind))
 
-    def _on_reselected(self, local: QRect) -> None:
+    def _on_reselected(self, local: QRect, whole: bool = False) -> None:
         if self.snap is None:
             return
         geo, _, _ = self._screen()
@@ -277,9 +277,16 @@ class Controller(QObject):
         self.snap.set_selection(rect, "manual")
         self._place()
         cap_id = str(id(self.snap.cap))
-        fut = self.collector.uia_fast.submit(uia.text_at, (rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2)
-        fut.add_done_callback(lambda f: self.kind_found.emit(
-            cap_id, content.classify(f.result() if not f.exception() else "", source="selection")))
+        # 按框里的原文判断内容类型（推荐问题跟着变）。不能取"选区中心点下面的控件"：那时盖在最上面的是
+        # 我们自己的定格浮层，取到的永远是它。单击选中整个窗口时按整窗的文字算（英文界面不算"外文"）
+        target = self.snap.window_at_selection()
+        if target is None or self.collector.is_blocked(target):
+            self.kind_found.emit(cap_id, "text")
+            return
+        source, window_class = ("window", target.class_name) if whole else ("selection", "")
+        fut = self.collector.uia_fast.submit(uia.text_in_rect, target.hwnd, rect, 1.5)
+        fut.add_done_callback(lambda f: self.kind_found.emit(cap_id, content.classify(
+            (f.result() or "") if not f.exception() else "", source=source, window_class=window_class)))
 
     # ---------- 提问 ----------
 

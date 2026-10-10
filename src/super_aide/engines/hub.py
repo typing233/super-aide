@@ -17,8 +17,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
+import re
 import threading
 import time
 import traceback
@@ -43,7 +45,7 @@ from ..router.policy import fg_category
 from ..snapshot.collector import Context
 from ..snapshot.collector import Session as Snapshot
 from . import browser_use, computer, prompts
-from .base import Event, friendly_error, reported_failure
+from .base import Event, friendly_error, friendly_text, reported_failure, service_reason
 from .claude import ClaudeEngine, claude_env
 from .claude import complete as claude_complete
 from .claude import list_models as claude_models
@@ -62,6 +64,7 @@ STOPPED = {"ok": False, "stopped": True, "reason": "interrupted"}
 
 
 SLOW_STEP = 20  # 一步用了这么久（秒）就在记录里写上，看得出卡在哪儿
+ENGINE_TITLE = {"claude": "Claude", "codex": "Codex", "dsh": "DeepSeek"}
 
 
 def _note_slow_step(trace: list[str], seconds: float) -> None:
@@ -77,6 +80,68 @@ def _counted(done: dict) -> bool:
 def _crash(e: BaseException) -> dict:
     """引擎或我们自己的代码抛了异常：这一轮的结束事件带上异常的类型和内容（分得清是网络问题还是代码问题）。"""
     return {"ok": False, "error": friendly_error(e), "exception": f"{type(e).__name__}: {e}"[:500]}
+
+
+def _service_error(done: dict) -> bool:
+    """没办成是因为模型服务（限流、过载、断网、认证、接口故障），换个引擎可能就好了。
+    你中途停止、环境没就绪（浏览器操作没接通）、助手自己汇报没完成都不算。"""
+    if done.get("stopped") or done.get("hint") or done.get("reason") in ("reported", "interrupted"):
+        return False
+    return triggers.is_infra(done)
+
+
+def _shown(ev: Event) -> Event:
+    """给界面看的事件：引擎原始的接口报错（常常是英文）换成一句人话。记录里留原文。"""
+    if ev.type == "error" and ev.text:
+        return Event("error", friendly_text(ev.text), ev.data)
+    if ev.type == "done" and ev.data.get("error") and ev.data.get("reason") != "reported" and not ev.data.get("hint"):
+        return Event("done", ev.text, {**ev.data, "error": friendly_text(str(ev.data["error"]))})
+    return ev
+
+
+def _takeover_notes(conv: Conversation, failed: dict) -> list[str]:
+    """操作做到一半换了引擎：告诉接手的引擎前一个已经做过哪些步骤，先看现状，别重复做。"""
+    steps = failed.get("trace") or []
+    if conv.mode != "act" or not steps:
+        return []
+    done = "\n".join(f"  - {s}" for s in steps[-15:])
+    return [f"另一个引擎刚才做这件事做到一半，因为模型服务出错断了。它已经做过这些步骤：\n{done}\n"
+            "先检查现在的状态，已经做完的不要重复做，再接着把事情做完。"]
+
+
+SPECIFIC = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-:/\\]*")
+
+
+def _specifics(question: str) -> set[str]:
+    """问题里具体的东西：英文词、数字、文件名、路径（不分大小写）。两问只有这些不同，就是两件不同的事。"""
+    return {m.group(0).strip(".:-/\\").lower() for m in SPECIFIC.finditer(question)} - {""}
+
+
+JUDGE_FRONT_LIMIT = 4000  # 评审看的前台窗口完整内容最多这么多字
+
+
+def _front_text(home: Path | None) -> str:
+    """首问时前台窗口的完整内容（快照里的文件），截到 JUDGE_FRONT_LIMIT 字。"""
+    if home is None:
+        return ""
+    try:
+        context = json.loads((home / "context.json").read_text(encoding="utf-8"))
+        front = next((w for w in context.get("windows", []) if w.get("foreground") and w.get("text")), None)
+        return (home / front["text"]).read_text(encoding="utf-8")[:JUDGE_FRONT_LIMIT] if front else ""
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
+def _judge_context(conv: Conversation) -> str:
+    """评审看的屏幕内容：首问时交给引擎的环境资料（时间、前台窗口、框选区域的原文、所有窗口），
+    再加前台窗口完整内容的节选。只给框选的原文时，评审会把回答里用到的别处内容（比如框外的代码）判成编造。"""
+    message = conv.first[1] if conv.first else ""
+    env = message.split("【提问时的环境】", 1)[1].split("【按需读取的资料】", 1)[0].strip() \
+        if "【提问时的环境】" in message else ""
+    if not env:
+        env = "\n".join(x for x in (conv.situation.get("text", ""), conv.situation.get("errors", "")) if x)
+    front = _front_text(conv.home)
+    return f"{env}\n\n前台窗口的完整内容（节选）：\n{front}" if front else env
 
 
 @dataclass
@@ -107,6 +172,7 @@ class Conversation:
     started: float = field(default_factory=time.time)
     first: tuple | None = None  # 首问原样的（问题, 消息, 图片）：后台对比用同一份再答一遍
     escalate: bool = False      # 上一轮没办成：下一轮换更强的配置
+    live_ui: bool = False       # 回答时看过实时屏幕、在屏幕上圈过位置：后台对比的会话没有这些工具，不比
     stopped: bool = False       # 这一轮是你按 Esc 停下的
     trouble: list[dict] = field(default_factory=list)  # 这次对话里要交给自我改进的信号（没办成、👎、停下的原因）
     evolve_timer: object | None = None
@@ -294,10 +360,19 @@ class EngineHub(QObject):
             conv.task.vec = await loop.run_in_executor(None, self._vector, question, situation.text)
             self._check_reask(conv)
             await self._open(conv)
-            message = prompts.first_message(question, conv.ctx, conv.mode, self._notes(conv), lessons)
+            notes = self._notes(conv)
+            message = prompts.first_message(question, conv.ctx, conv.mode, notes, lessons)
             conv.first = (question, message, list(conv.ctx.images))
             answering = True
-            await self._turn(conv, message, conv.ctx.images)
+            failed = await self._turn(conv, message, conv.ctx.images, hand_over=True)
+            if failed is not None:  # 服务出错、别的引擎能用：换它从头接着做
+                answering = False
+                await self._hand_over(conv, failed)
+                message = prompts.first_message(question, conv.ctx, conv.mode,
+                                                notes + _takeover_notes(conv, failed), lessons)
+                conv.first = (question, message, list(conv.ctx.images))
+                answering = True
+                await self._turn(conv, message, conv.ctx.images)
         except asyncio.CancelledError:
             if not answering:  # 还在准备（整理快照、打开引擎）时按了 Esc。回答中途停下的结束由 _turn 报
                 self._drop_sessions(conv)  # 问题还没交给引擎：这个对话不再接着问
@@ -378,19 +453,26 @@ class EngineHub(QObject):
         return [f"{status.note}这次需要操作浏览器里的网页时，不要尝试 Browser Use；可以试 Computer Use，"
                 "但它可能因为确定不了当前网址而停下。办不成就在汇报第一行写「没完成：浏览器操作还没接通」。"]
 
-    async def _turn(self, conv: Conversation, text: str, images: list) -> None:
+    async def _turn(self, conv: Conversation, text: str, images: list, hand_over: bool = False) -> dict | None:
+        """一轮问答。hand_over=True（首问）时，碰上服务出错（限流、过载、断网……）而别的引擎能用：不报结束，
+        返回这一轮的结束信息（带做过的步骤），由调用方换引擎接着做；其它时候返回 None。"""
         conv.busy, conv.sending, conv.delegated = True, True, False
         if conv.learn_timer is not None:
             conv.learn_timer.cancel()  # 还在接着问：等这次对话结束了再总结
         conv.reactive = 0
         answer, trace, started = "", [], time.monotonic()
         step_started = started
-        finished = False
+        finished = handing = False
+        held: list[Event] = []  # 可能要换引擎：出错的提示先压着，确定这一轮就此结束了再给界面
+        stream = conv.session.send(text, images)
         try:
-            async for ev in conv.session.send(text, images):
+            async for ev in stream:
                 transient = ev.data.get("transient")  # "正在思考…"：只在界面上显示，不算一步
                 if ev.type in ("status", "done") and trace and not transient:
                     _note_slow_step(trace, time.monotonic() - step_started)
+                if ev.type == "error" and hand_over:
+                    held.append(ev)
+                    continue
                 if ev.type in ("new_message", "retract"):
                     answer = ""
                 elif ev.type == "delta":
@@ -398,6 +480,8 @@ class EngineHub(QObject):
                 elif ev.type == "status" and ev.text and not transient and (not trace or trace[-1] != ev.text):
                     trace.append(ev.text)  # 助手做了哪些步骤：总结经验时用来看它绕没绕路
                     step_started = time.monotonic()
+                if ev.type == "status" and computer.looks_at_screen(ev.data.get("tool", "")):
+                    conv.live_ui = True
                 elif ev.type == "done":
                     finished = True
                     ev.data.setdefault("model", conv.decision.model if conv.decision else "")
@@ -408,13 +492,22 @@ class EngineHub(QObject):
                     else:
                         self._check_outcome(conv, ev.data, answer)
                     self._watch_outcome(conv, ev.data)
+                    if self._avoid_after(conv, ev.data) and hand_over:
+                        handing = True
+                        break
                     conv.turns.append(ev.data)
                     self._learn_from_turn(conv, ev.data)
                     if len(conv.turns) == 1:
                         self._after_first_turn(conv, ev.data, answer)
                     self._lessons_used(conv, ev.data)
                     self._save_history(conv, ev.data, answer, trace)
-                self._emit(conv.key, ev)
+                for shown in held:
+                    self._emit(conv.key, _shown(shown))
+                held.clear()
+                self._emit(conv.key, _shown(ev))
+            if handing:
+                await stream.aclose()
+                return dict(ev.data, trace=list(trace))
             if not finished:  # 比如 CLI 中途退出、退出码却是 0：输出就这么断了。界面不能一直等着
                 raise ConnectionError(tr("引擎没给出结果就断开了"))
         except asyncio.CancelledError:
@@ -427,15 +520,52 @@ class EngineHub(QObject):
                 self._drop_sessions(conv)  # 引擎可能还停在半路：不再用这个会话，接着问会说对话已经结束
             raise
         except Exception as e:  # noqa: BLE001
+            done = _crash(e) | ({"stopped": True} if conv.stopped else {})
+            if self._avoid_after(conv, done) and hand_over:
+                log.warning("引擎出错，换一个接着做：%s", done["exception"])
+                handing = True
+                return dict(done, trace=list(trace))
             log.exception("引擎出错")
+            for shown in held:
+                self._emit(conv.key, _shown(shown))
             self._emit(conv.key, Event("error", friendly_error(e)))
-            self._emit(conv.key, Event("done", data=_crash(e) | ({"stopped": True} if conv.stopped else {})))
+            self._emit(conv.key, Event("done", data=done))
             if not conv.stopped:
                 self._crashed(conv, e)
         finally:
-            conv.busy = conv.sending = False
-            self._schedule_learning(conv)
-            self._schedule_evolve(conv)
+            conv.sending = False
+            if not handing:  # 换引擎接着做时还在忙：按 Esc 照样能停
+                conv.busy = False
+                self._schedule_learning(conv)
+                self._schedule_evolve(conv)
+        return None
+
+    def _avoid_after(self, conv: Conversation, done: dict) -> bool:
+        """这一轮没办成是因为模型服务（限流、过载、断网、认证、接口故障）：别的引擎能用时，这个引擎先歇
+        UNAVAILABLE_S 秒，接下来的提问交给别的引擎（实测：Codex 一直 429，路由还是每次都交给它，次次秒失败）。
+        返回歇没歇。只有它一个能用时不歇：歇了就谁都用不了。"""
+        if conv.decision is None or conv.stopped or done.get("ok") or not _service_error(done):
+            return False
+        engine = conv.decision.engine
+        if not [e for e in self.router.available() if e != engine]:
+            return False
+        self.router.mark_unavailable(engine)
+        log.info("%s 的服务出错（%s），先换别的引擎", engine, str(done.get("error") or done.get("exception"))[:200])
+        return True
+
+    async def _hand_over(self, conv: Conversation, failed: dict) -> None:
+        """首问碰上服务出错：换另一个引擎从头接着做（设计 7.6 节）。出错的引擎已经由 _avoid_after 歇下了，
+        界面上只多一行状态；写了一半的回答撤掉。"""
+        old, conv.session = conv.session, None
+        if old is not None:
+            self.loop.create_task(old.close())
+        before = conv.decision.engine if conv.decision else ""
+        self._emit(conv.key, Event("retract"))
+        await self._open(conv)
+        reason = service_reason(f"{failed.get('error') or ''} {failed.get('exception') or ''}")
+        self._emit(conv.key, Event("status", tr("{engine} {reason}，换 {other} 接着做…",
+                                                engine=ENGINE_TITLE.get(before, before), reason=reason,
+                                                other=ENGINE_TITLE.get(conv.decision.engine, conv.decision.engine))))
 
     async def _stop(self, conv: Conversation) -> None:
         """按了 Esc。引擎正在回答：先请它自己停下（会话还能接着问），过了 STOP_GRACE 秒还在跑就直接结束这一轮；
@@ -683,8 +813,10 @@ class EngineHub(QObject):
         def same(a: str, b: str) -> bool:
             return SequenceMatcher(None, a, b).ratio() >= 0.8
 
-        if same(prev.question, conv.question) and same(prev.situation.get("text", "")[:500],
-                                                        conv.situation.get("text", "")[:500]):
+        # 只差了文件名、数字、路径这类具体的东西（"新建 a.txt 内容是 1" → "新建 b.txt 内容是 2"），是一件新的事，
+        # 不是没答好又问了一遍（实测：连着几个办成了的同类操作，每个都被记成上一个没答好，路由还一路加强）
+        if same(prev.question, conv.question) and _specifics(prev.question) == _specifics(conv.question) \
+                and same(prev.situation.get("text", "")[:500], conv.situation.get("text", "")[:500]):
             self.router.record(prev.decision, prev.task, False, "reask")
             log.info("很快又问了一样的问题：上一次（%s · %s）记一次没答好", prev.decision.model, prev.decision.effort)
 
@@ -693,7 +825,9 @@ class EngineHub(QObject):
         if conv.decision is None or not _counted(done) or not done.get("ok"):
             return
         self.router.observe(conv.decision, float(done.get("seconds") or 0), done.get("cost"))
-        if conv.mode != "ask" or conv.first is None or not answer.strip():
+        # 界面问答（回答时看了实时屏幕、圈了位置）不比：后台那份没有这些工具，比出来的"差"是工具差，不是配置差
+        # （实测："在屏幕上圈给我看"的问题，便宜的配置因为圈不了被判成 0.5）
+        if conv.mode != "ask" or conv.first is None or not answer.strip() or conv.live_ui:
             return
         candidate = self.router.duel_candidate(conv.decision)
         if candidate is not None:
@@ -767,9 +901,9 @@ class EngineHub(QObject):
 
     async def _judge(self, question: str, conv: Conversation, served: str, candidate: str) -> Verdict | None:
         flip = random.random() < 0.5  # 两份随机排前后
-        context = "\n".join(x for x in (conv.situation.get("text", ""), conv.situation.get("errors", "")) if x)
+        prompt = judge.prompt(question, _judge_context(conv), served, candidate, flip, judge.asked_at(conv.started))
         try:
-            text = await self._complete(judge.prompt(question, context, served, candidate, flip), judge.SCHEMA)
+            text = await self._complete(prompt, judge.SCHEMA)
         except Exception as e:  # noqa: BLE001
             log.warning("后台对比的评审失败：%s", friendly_error(e))
             return None

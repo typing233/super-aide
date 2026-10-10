@@ -88,3 +88,16 @@ def test_blocked(command):
 ])
 def test_not_blocked(command):
     assert blocked_reason(command) is None
+
+
+def test_read_only_sessions_can_hand_in_their_conclusion():
+    """只读会话（自我改进的复核、初筛）用 StructuredOutput 交结论：原来被只读钩子挡掉，结论交不上。"""
+    import asyncio
+
+    from super_aide.engines import claude
+
+    verdict = {"approve": False, "problems": ["app.js:383 正则会把文件夹名一起删掉"], "privacy": []}
+    assert claude._read_only_allows("StructuredOutput", verdict)
+    assert asyncio.run(claude._readonly_hook({"tool_name": "StructuredOutput", "tool_input": verdict}, None, None)) == {}
+    assert not claude._read_only_allows("Write", {"file_path": "x.txt", "content": "y"})  # 改东西的照样挡
+    assert not claude._read_only_allows("Bash", {"command": "Remove-Item x.txt"})

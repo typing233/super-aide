@@ -12,6 +12,7 @@ import threading
 import time
 from ctypes import wintypes
 
+import win32api
 import win32con
 import win32gui
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -59,9 +60,17 @@ def _font(size: int) -> ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
+def monitor_of(rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    """框所在的那块屏幕（物理像素）。"""
+    try:
+        return tuple(win32api.GetMonitorInfo(win32api.MonitorFromRect(rect, win32con.MONITOR_DEFAULTTONEAREST))["Monitor"])
+    except Exception:  # noqa: BLE001 - 取不到就不限制
+        return (-(1 << 30), -(1 << 30), 1 << 30, 1 << 30)
+
+
 def render(targets: list[tuple[tuple[int, int, int, int], str]], origin: tuple[int, int],
-           size: tuple[int, int], scale: float) -> Image.Image:
-    """画出所有指引框（物理像素）。origin/size 是这张透明画布在屏幕上的位置和大小。"""
+           size: tuple[int, int], scale: float, screen=monitor_of) -> Image.Image:
+    """画出所有指引框（物理像素）。origin/size 是这张透明画布在屏幕上的位置和大小；screen(框) 给出框所在的屏幕。"""
     img = Image.new("RGBA", size, (0, 0, 0, 0))
     glow = Image.new("RGBA", size, (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
@@ -74,10 +83,17 @@ def render(targets: list[tuple[tuple[int, int, int, int], str]], origin: tuple[i
         d.rounded_rectangle(box, radius, outline=ACCENT + (255,), width=width)
         text = f"{number}  {label}" if len(targets) > 1 or label else str(number)
         tw = d.textlength(text, font=font)
-        th = round(22 * scale)
-        lx = box[0]
-        ly = box[1] - th - round(6 * scale) if box[1] - th - 6 * scale > 0 else box[3] + round(6 * scale)
-        d.rounded_rectangle((lx, ly, lx + tw + round(16 * scale), ly + th), th // 2, fill=ACCENT_2 + (240,))
+        th, gap = round(22 * scale), round(6 * scale)
+        lw = round(tw) + round(16 * scale)
+        # 编号标签按屏幕摆（原来按画布判断，框贴着屏幕上沿、右沿时标签整个画到了屏幕外，看不出是第几步）：
+        # 放在框上面，上面没地方就放下面；左边和框对齐，右边出了屏幕就往左挪
+        mx0, my0, mx1, _my1 = screen((x0, y0, x1, y1))
+        above = y0 - 3 - gap - th
+        sy = above if above >= my0 else y1 + 3 + gap
+        sx = max(mx0, min(x0 - 3, mx1 - lw))
+        lx = max(0, min(sx - origin[0], size[0] - lw))
+        ly = max(0, min(sy - origin[1], size[1] - th))
+        d.rounded_rectangle((lx, ly, lx + lw, ly + th), th // 2, fill=ACCENT_2 + (240,))
         d.text((lx + round(8 * scale), ly + th / 2), text, fill=(255, 255, 255, 255), font=font, anchor="lm")
     glow = glow.filter(ImageFilter.GaussianBlur(radius=4 * scale))
     cut = ImageDraw.Draw(glow)  # 直接写像素（不混合）：把框里面的光晕擦掉

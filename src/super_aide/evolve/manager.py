@@ -326,6 +326,9 @@ class EvolveManager(QObject):
         if not chain or chain[-1].id != job_id:
             return tr("只能撤销最近一次改进")
         job = chain[-1]
+        if job.version != __version__:
+            # 之后装过别的版本（比如官方更新已经包含了它）：装回它之前的包等于把整个应用降回旧版本
+            return tr("装过新版本以后，这次改进不能再单独撤销")
         return self._spawn(job, job.prev_wheel, job.wheel, ["--evolve-undone", job.id], [], "undo")
 
     def _spawn(self, job: Job, install: str, fallback: str, args: list[str], fallback_args: list[str],
@@ -770,13 +773,15 @@ class EvolveManager(QObject):
                 leftovers.append(old)
         self.jobs.save()
         version = Installed.current().version
-        title = tr("把本地改进移到 {version}", version=version)
         if not applied and not leftovers:
+            # 标题存中英两份（界面按当时的语言挑），不按现在的界面语言存死
             self._finish(job, "none", error=tr("新版本已经包含了全部本地改进"),
-                         result={"action": "none", "title_zh": tr("新版本已经包含了全部本地改进"), "title_en": "",
+                         result={"action": "none", "title_zh": "新版本已经包含了全部本地改进",
+                                 "title_en": "The new version already includes all local improvements",
                                  "summary_zh": "", "summary_en": ""})
             return
-        result = {"action": "changed", "title_zh": title, "title_en": f"Carry local improvements to {version}",
+        result = {"action": "changed", "title_zh": f"把本地改进移到 {version}",
+                  "title_en": f"Carry local improvements to {version}",
                   "summary_zh": "；".join(self._title(j) for j in applied + leftovers), "summary_en": "",
                   "cause": "", "tests": "", "risk": ""}
         review = {"approve": True, "skipped": True} if not leftovers else {}
@@ -1098,7 +1103,9 @@ class EvolveManager(QObject):
         from ..i18n import lang
 
         r = job.result or {}
-        return (r.get("title_en") if lang() == "en" else r.get("title_zh")) or r.get("title_zh") or job.label
+        if lang() == "en":  # 以前的记录可能没有英文标题：是界面上认得的那几句（比如"新版本已经包含了全部本地改进"）照样翻
+            return r.get("title_en") or tr(r.get("title_zh") or job.label)
+        return r.get("title_zh") or job.label
 
     def _view(self, job: Job, last_applied: str = "") -> dict:
         r = job.result or {}
@@ -1109,7 +1116,7 @@ class EvolveManager(QObject):
                 "error": job.error, "pr": {k: job.pr.get(k) for k in ("number", "url", "dup_of", "privacy", "error")},
                 "privacy_pending": bool(job.pr.get("privacy")) and "privacy_ok" not in job.pr
                 and job.status == "done" and self.contribute_enabled(),
-                "can_undo": job.id == last_applied and not self.editable,
+                "can_undo": job.id == last_applied and not self.editable and job.version == __version__,
                 "engine": job.engine, "model": job.model, "effort": job.effort}
 
     def snapshot(self) -> dict:

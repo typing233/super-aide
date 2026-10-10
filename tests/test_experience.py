@@ -147,6 +147,8 @@ def test_only_detours_are_worth_learning():
     assert learn.worth_learning([turn(ok=False, reason="interrupted")]) == ""  # 你中途停止
     assert learn.worth_learning([turn(ok=False, error="429 rate limit")]) == ""  # 限流不算
     assert learn.worth_learning([turn(seconds=300)]) == "绕了很久才办完"
+    # 跑了很久、被你按 Esc 停下的：过程不完整，不拿去总结（实测：停下的长任务被当成"绕了很久才办完"）
+    assert learn.worth_learning([turn(seconds=300, ok=False, reason="interrupted", answer="")]) == ""
     assert learn.worth_learning([turn(question="以后别再用截图读代码")]) == "用户要求以后照着做"
     assert learn.worth_learning([turn()], negative=True) == "用户说上一轮没答好"
 

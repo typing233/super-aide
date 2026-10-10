@@ -13,8 +13,8 @@ DIM = QColor(0, 0, 0, 115)
 
 
 class Overlay(QWidget):
-    #: 用户改了选区（逻辑坐标，相对浮层左上角）
-    reselected = Signal(QRect)
+    #: 用户改了选区（逻辑坐标，相对浮层左上角；单击选中了光标下的整个窗口时第二个参数为真）
+    reselected = Signal(QRect, bool)
 
     def __init__(self) -> None:
         # 不抢焦点：拖拽框选时输入框保持可输入
@@ -69,10 +69,12 @@ class Overlay(QWidget):
     def mouseReleaseEvent(self, e) -> None:  # noqa: N802
         if self._drag_from is None:
             return
+        whole = False
         if self.sel.width() < 8 or self.sel.height() < 8:  # 单击：选中光标下的窗口
             point = e.position().toPoint() + self.geometry().topLeft()
             hit = next((r for r in self.window_rects if r.contains(point)), None)
             self.sel = hit.translated(-self.geometry().topLeft()) if hit else self.rect()
+            whole = hit is not None
             self.update()
         self._drag_from = None
-        self.reselected.emit(QRect(self.sel))
+        self.reselected.emit(QRect(self.sel), whole)

@@ -107,8 +107,8 @@ async function save() {
     banner(resp.errors.join('\n'));
   } else {
     if (resp.data.lang !== state.data.lang) {
-      // 换了语言：整页按新语言重画（浏览器操作没接通时那一行的修法也由宿主按新语言重新给）
-      Object.assign(state.data, { lang: resp.data.lang, browser: resp.data.browser });
+      // 换了语言：整页按新语言重画（浏览器操作没接通时那一行的修法、自我改进记录的标题和说明，也由宿主按新语言重新给）
+      Object.assign(state.data, { lang: resp.data.lang, browser: resp.data.browser, evolve_state: resp.data.evolve_state });
       render();
     }
     banner('');

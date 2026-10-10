@@ -190,7 +190,12 @@ def test_after_restart_marks_applied_and_notifies(env, monkeypatch):
     mgr._after_apply(job.id, "", "")
     assert job.status == "done" and job.applied > 0 and "已完成自我改进" in env.notices
     assert not (mgr.jobs.folder(job) / "evidence").exists()  # 证据删掉，补丁留着
+    monkeypatch.setattr(manager, "__version__", job.version)  # 重启以后跑的就是这次改进打出来的版本
     assert mgr.snapshot()["items"][0]["can_undo"]
+    # 之后装了官方新版本（已经包含这个改进）：再撤销就是装回旧的包，等于把整个应用降回旧版本
+    monkeypatch.setattr(manager, "__version__", "0.3.0")
+    assert not mgr.snapshot()["items"][0]["can_undo"]
+    assert mgr.undo(job.id) == "装过新版本以后，这次改进不能再单独撤销"
 
 
 def test_official_update_queues_a_carry_over(env, monkeypatch):
