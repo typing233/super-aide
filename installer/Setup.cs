@@ -118,6 +118,11 @@ namespace SuperAideSetup
         }
         public static string RunKey { get { return RegistryRoot + @"\Run"; } }
         public static string UninstallKey { get { return RegistryRoot + @"\Uninstall\SuperAide"; } }
+        // 超级助手启动时登记的应用标识（系统通知上显示的名字和图标，见 app.register_identity）
+        public static string NotifyKey
+        {
+            get { return Sandboxed ? RegistryRoot + @"\AppUserModelId\Typing233.SuperAide" : @"Software\Classes\AppUserModelId\Typing233.SuperAide"; }
+        }
     }
 
     static class Net
@@ -937,6 +942,7 @@ namespace SuperAideSetup
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(Places.RunKey, true))
                     if (key != null && IsOurs(key.GetValue("SuperAide") as string)) key.DeleteValue("SuperAide", false);
                 Registry.CurrentUser.DeleteSubKeyTree(Places.UninstallKey, false);
+                Registry.CurrentUser.DeleteSubKeyTree(Places.NotifyKey, false);
 
                 if (removeData)
                 {

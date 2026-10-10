@@ -142,20 +142,39 @@ class Embedder:
         """已经加载好了（不会触发加载，不会卡住）。"""
         return self._session is not None
 
+    def unload(self) -> bool:
+        """卸掉模型：闲着时常驻内存少约 160MB，下次用时再加载（约 1.4 秒，加载时不占 Python 的全局锁）。
+        正在加载就算了（不等它）。返回卸没卸。"""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            if self._session is None:
+                return False
+            self._session = self._tokenizer = None
+        finally:
+            self._lock.release()
+        import gc
+
+        gc.collect()
+        return True
+
     # ---- 用 ----
 
     def encode(self, texts: list[str], kind: str = "passage"):
         """→ 每行一个单位长度的向量（numpy 数组）；模型还没好时返回 None。kind：query 或 passage。"""
         if not texts or not self._load():
             return None
+        session, tokenizer = self._session, self._tokenizer  # 别的线程这时卸掉也不影响这一次
+        if session is None or tokenizer is None:
+            return None
         import numpy as np
 
         prefix = self.spec.query if kind == "query" else self.spec.passage
-        ids, mask = self._tokenize([prefix + " ".join(t.split()) for t in texts])
+        ids, mask = self._tokenize([prefix + " ".join(t.split()) for t in texts], tokenizer)
         feed = {"input_ids": ids, "attention_mask": mask}
         if "token_type_ids" in self._inputs:
             feed["token_type_ids"] = np.zeros_like(ids)
-        hidden = self._session.run(None, {k: v for k, v in feed.items() if k in self._inputs})[0]
+        hidden = session.run(None, {k: v for k, v in feed.items() if k in self._inputs})[0]
         if self.spec.pooling == "cls":
             vectors = hidden[:, 0]
         else:
@@ -164,15 +183,16 @@ class Embedder:
         return vectors / np.clip(np.linalg.norm(vectors, axis=1, keepdims=True), 1e-9, None)
 
 
-    def _tokenize(self, texts: list[str]):
+    def _tokenize(self, texts: list[str], tokenizer=None):
         import numpy as np
 
+        tokenizer = tokenizer or self._tokenizer
         if self.spec.tokenizer != "xlmr-spm":
-            batch = self._tokenizer.encode_batch(texts)
+            batch = tokenizer.encode_batch(texts)
             return (np.array([b.ids for b in batch], dtype=np.int64),
                     np.array([b.attention_mask for b in batch], dtype=np.int64))
         # XLM-R 的编号：sentencepiece 的编号 +1（fairseq 的偏移），未知词 3；前后加 <s>=0、</s>=2；补齐用 <pad>=1
-        rows = [[0] + [i + 1 if i else 3 for i in self._tokenizer.encode(t, out_type=int)[:MAX_TOKENS - 2]] + [2]
+        rows = [[0] + [i + 1 if i else 3 for i in tokenizer.encode(t, out_type=int)[:MAX_TOKENS - 2]] + [2]
                 for t in texts]
         width = max(map(len, rows))
         ids = np.ones((len(rows), width), dtype=np.int64)

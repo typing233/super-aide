@@ -203,6 +203,47 @@ def test_codex_model_metadata_reaches_the_router():
                                                  "desc": "Fast and affordable model for easier tasks.", "upgrade": ""}})]
 
 
+def test_reloading_codex_never_hands_out_the_process_being_closed(monkeypatch):
+    """准备窗口改了服务地址：重连、预热、发现模型同时开始。正在关的旧进程不能交给别人（会报 Codex process is not running）。"""
+    from super_aide.engines import codex
+
+    class FakeClient:
+        def __init__(self, n):
+            self.n, self.closed = n, False
+            self._client = SimpleNamespace()
+
+        async def close(self):
+            await asyncio.sleep(0.01)  # 关进程要一会儿
+            self.closed = True
+
+    started = []
+
+    async def start(self, overrides):
+        started.append(FakeClient(len(started)))
+        return started[-1]
+
+    async def no_hooks(self, mode):
+        return ()
+
+    monkeypatch.setattr(codex.CodexEngine, "_start", start)
+    monkeypatch.setattr(codex.CodexEngine, "_hook_overrides", no_hooks)
+    monkeypatch.setattr(codex.computer, "codex_overrides", lambda *a: ())
+    monkeypatch.setattr(codex.experience, "codex_overrides", lambda: ())
+    engine = codex.CodexEngine("", False)
+
+    async def scenario():
+        old = await engine.client("ask")
+        reload = asyncio.create_task(engine.reload())
+        await asyncio.sleep(0)  # 重连已经开始关旧进程
+        fresh = await engine.client("ask")
+        await reload
+        return old, fresh
+
+    old, fresh = asyncio.run(scenario())
+    assert old.closed and fresh is not old and not fresh.closed
+    assert asyncio.run(engine.client("ask")) is fresh  # 新起的留着用，没被一起关掉
+
+
 def test_answers_that_looked_at_the_live_screen_are_not_dueled():
     """后台对比的会话没有看实时界面、圈位置的工具：用过它们的问答比出来是工具差，不是配置差。"""
     created = []

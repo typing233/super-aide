@@ -39,7 +39,8 @@ const state = {
   diffs: {},             // 自我改进：展开了改动的那几条 → 补丁原文
   confirming: '',        // 两步确认（撤销、不要了、合并）：第一次点过的那个按钮
   confirmTimer: null,
-  ticker: null,          // 正在改进的那一行的计时
+  armed: null,           // 那个按钮和它原来的字：超时或点了别的确认时变回去
+  ticker: null,         // 正在改进的那一行的计时
   moving: null,          // 换数据位置：选好的去处、搬的进度、出错的原因
 };
 
@@ -612,14 +613,34 @@ function confirmTwice(btn, key, label, action) {
   if (state.confirming === key) {
     clearTimeout(state.confirmTimer);
     state.confirming = '';
+    state.armed = null;
     action();
     return;
   }
+  disarm();
   state.confirming = key;
+  state.armed = { btn, original: btn.textContent };
   btn.textContent = label;
   btn.classList.add('danger');
+  state.confirmTimer = setTimeout(() => { disarm(); renderEvolve(); }, 3000);
+}
+
+// 上一个"确认…？"变回原样：没被重画的按钮（正在改进那一行的"不要了"）也要变回去
+function disarm() {
   clearTimeout(state.confirmTimer);
-  state.confirmTimer = setTimeout(() => { state.confirming = ''; renderEvolve(); }, 3000);
+  if (state.armed) {
+    state.armed.btn.textContent = state.armed.original;
+    state.armed.btn.classList.remove('danger');
+  }
+  state.armed = null;
+  state.confirming = '';
+}
+
+// 正在做、排着的改进"不要了"（点两下确认）：正在跑的会话马上停下，改到一半的还原
+function cancelButton(job) {
+  const key = `cancel-${job.id}`;
+  return textBtn(state.confirming === key ? I18N.t('确认不要？') : I18N.t('不要了'),
+    (b) => confirmTwice(b, key, I18N.t('确认不要？'), () => call('evolveCancel', job.id)));
 }
 
 function textBtn(label, onClick, cls = '') {
@@ -661,6 +682,8 @@ function evolveItem(job) {
     actions.append(textBtn(state.confirming === `discard-${job.id}` ? I18N.t('确认不要？') : I18N.t('不要了'),
       (b) => confirmTwice(b, `discard-${job.id}`, I18N.t('确认不要？'), () => call('evolveDiscard', job.id))));
   }
+  if (job.can_cancel) actions.append(job.cancelling
+    ? Object.assign(el('span', 'evo-meta shimmer'), { textContent: I18N.t('正在停下…') }) : cancelButton(job));
   if (job.status === 'done' && job.can_undo) {
     actions.append(textBtn(state.confirming === `undo-${job.id}` ? I18N.t('确认撤销？') : I18N.t('撤销'),
       (b) => confirmTwice(b, `undo-${job.id}`, I18N.t('确认撤销？'), async () => {
@@ -750,8 +773,18 @@ function renderEvolve() {
     const tick = () => { $('#evolve-now-time').textContent = active.started ? fmtElapsed(active.started) : ''; };
     tick();
     state.ticker = setInterval(tick, 1000);
+    // 进度每走一步都会重画这一行：按钮没变就不换，免得正按下去的那一下落空
+    const nowActions = $('#evolve-now-actions');
+    const sig = `${active.id}|${active.cancelling ? 'stopping' : active.can_cancel ? 'cancel' : ''}`;
+    if (nowActions.dataset.sig !== sig) {
+      nowActions.dataset.sig = sig;
+      nowActions.innerHTML = '';
+      if (active.cancelling) nowActions.append(Object.assign(el('span', 'evo-meta shimmer'), { textContent: I18N.t('正在停下…') }));
+      else if (active.can_cancel) nowActions.append(cancelButton(active));
+    }
   } else {
     now.hidden = true;
+    $('#evolve-now-actions').dataset.sig = '';
   }
   // 最近的几条
   const list = $('#evolve-list');
@@ -796,8 +829,14 @@ function renderEvolve() {
     box.innerHTML = '';
     if (!items.length) {
       const empty = el('div', 'evo-empty pad');
-      empty.textContent = I18N.t('没有待审的社区 PR');
+      empty.textContent = ev.community_checked && !ev.community_checking
+        ? I18N.t('没有待审的社区 PR · {time} 检查过', { time: fmtTime(ev.community_checked) }) : I18N.t('没有待审的社区 PR');
       box.append(empty);
+    }
+    if (ev.community_error && !ev.community_checking) { // 原来检查失败（比如连不上 GitHub）只写日志，看起来像什么都没发生
+      const err = el('div', 'evo-empty pad error');
+      err.textContent = I18N.t('没能检查：{error}', { error: ev.community_error });
+      box.append(err);
     }
     for (const pr of items) box.append(communityItem(pr));
   }

@@ -205,6 +205,11 @@ class SettingsBridge(WindowBridge):
     def evolveDiscard(self, job_id: str) -> None:  # noqa: N802
         self.host.evolve.discard(job_id)
 
+    @Slot(str)
+    def evolveCancel(self, job_id: str) -> None:  # noqa: N802
+        """正在做或排着的改进不要了。"""
+        self.host.evolve.cancel(job_id)
+
     @Slot(str, bool)
     def privacyDecision(self, job_id: str, submit: bool) -> None:  # noqa: N802
         self.host.evolve.privacy_decision(job_id, submit)

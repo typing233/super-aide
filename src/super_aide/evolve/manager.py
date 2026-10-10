@@ -33,7 +33,7 @@ from ..engines.claude import claude_env
 from ..i18n import tr
 from . import agent, community, evidence, github, patching, prompts, triggers
 from .agent import Choice, ClaudeRun
-from .jobs import BUSY, Job, Jobs, new_id
+from .jobs import BUSY, FINISHED, Job, Jobs, new_id
 from .testenv import TestEnv, TestRun, base_python, compare, find_uv
 from .workshop import Installed, Workshop, restore_point
 
@@ -153,6 +153,9 @@ class EvolveManager(QObject):
         self._yield = False
         self._login: dict = {}
         self._checking_community = False
+        self._cancelled: set[str] = set()  # 你点了"不要了"、还在收尾的任务
+        self._stepping = ""  # 正在做哪个任务的一步
+        self._session_task: asyncio.Task | None = None  # 正在跑的模型会话
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
 
@@ -287,6 +290,29 @@ class EvolveManager(QObject):
         job = self.jobs.get(job_id)
         if job is not None and job.status in ("ready", "held"):
             self._finish(job, "discarded")
+
+    def cancel(self, job_id: str) -> None:
+        """正在做或排着的改进不要了（原来只能关掉整个自我改进让它暂停，再打开又接着做）。
+        排着、等网络、等登录的直接结束；正在跑的马上掐断当前会话，这一步收尾后记成"不要了"、工作台还原。"""
+        job = self.jobs.get(job_id)
+        if job is None or job.status not in ("queued", "triage", "running", "waiting", "login"):
+            return
+        self._cancelled.add(job_id)
+
+        def stop() -> None:
+            if self._stepping == job_id:  # 正在做这个任务的某一步：掐断会话，_step 收尾时结束它
+                task = self._session_task
+                if task is not None and not task.done():
+                    task.cancel()
+                self._changed()  # 设置里马上显示"正在停下…"（会话收尾要几秒）
+                return
+            self._cancelled.discard(job_id)
+            if job.status not in FINISHED:
+                self._finish(job, "discarded")
+            self._changed()
+
+        self.hub.loop.call_soon_threadsafe(stop)
+        self.wake()
 
     # ---------- 生效、撤销 ----------
 
@@ -480,6 +506,11 @@ class EvolveManager(QObject):
         if self._busy():
             return 20  # 你在用助手：等你用完
         self._yield = False
+        if job.id in self._cancelled:  # 你点了"不要了"
+            self._cancelled.discard(job.id)
+            self._finish(job, "discarded")
+            self._changed()
+            return 0
         if job.status == "queued":
             self._begin(job)
         elif job.status in ("waiting", "login"):
@@ -490,6 +521,7 @@ class EvolveManager(QObject):
             log.info("自我改进：%s 做到一半装了别的版本，从准备重来", job.id)
             self.jobs.update(job, phase="prepare", sessions=[s for s in job.sessions if s["role"] == "triage"],
                              fixes=0, review={}, result={})
+        self._stepping = job.id
         try:
             if job.status == "triage":
                 await self._triage(job)
@@ -500,6 +532,12 @@ class EvolveManager(QObject):
             self._pause(job, p)
         except Failed as e:
             self._finish(job, "failed", error=str(e))
+        finally:
+            self._stepping = ""
+        if job.id in self._cancelled:
+            self._cancelled.discard(job.id)
+            if job.status not in FINISHED:
+                self._finish(job, "discarded")
         self._changed()
         return 0
 
@@ -646,19 +684,25 @@ class EvolveManager(QObject):
             task = asyncio.ensure_future(agent.run_claude(run, text, record["id"], resume, on_step))
         else:
             task = asyncio.ensure_future(agent.run_codex(run, text, record["id"] if resume else "", on_step))
-        while not task.done():
-            await asyncio.wait({task}, timeout=30)
-            if task.done():
-                break
-            stalled = time.time() - self._progress_at > STALL_S
-            if stalled or self._yield or not self.cfg.evolve_enabled:
-                task.cancel()
-                try:
-                    await task
-                except BaseException:  # noqa: BLE001
-                    pass
-                return agent.Outcome(False, None, "", record["id"], 0.0, "network" if stalled else "yield",
-                                     tr("卡住了，稍后续上") if stalled else "")
+        self._session_task = task  # 你点"不要了"时从这里掐断
+        try:
+            while not task.done():
+                await asyncio.wait({task}, timeout=30)
+                if task.done():
+                    break
+                stalled = time.time() - self._progress_at > STALL_S
+                if stalled or self._yield or not self.cfg.evolve_enabled:
+                    task.cancel()
+                    try:
+                        await task
+                    except BaseException:  # noqa: BLE001
+                        pass
+                    return agent.Outcome(False, None, "", record["id"], 0.0, "network" if stalled else "yield",
+                                         tr("卡住了，稍后续上") if stalled else "")
+        finally:
+            self._session_task = None
+        if task.cancelled():  # 被"不要了"掐断：当成让路，_step 收尾时结束这个任务
+            return agent.Outcome(False, None, "", record["id"], 0.0, "yield", "")
         return task.result()
 
     # ---------- 各个阶段 ----------
@@ -1026,8 +1070,10 @@ class EvolveManager(QObject):
             for key in [k for k in reviews if k not in {str(p["number"]) for p in prs}]:
                 reviews.pop(key)
             self.state["last_triage"] = time.time()
-        except (github.GitHubError, Pause, Failed) as e:
+            self.state.pop("community_error", None)
+        except (github.GitHubError, Pause, Failed, OSError) as e:
             log.info("审社区 PR 没做完：%s", e)
+            self.state["community_error"] = str(e)[:300] or type(e).__name__  # 原来只写日志，设置里看不出没检查成
         finally:
             self._checking_community = False
             self._save_state()
@@ -1117,6 +1163,8 @@ class EvolveManager(QObject):
                 "privacy_pending": bool(job.pr.get("privacy")) and "privacy_ok" not in job.pr
                 and job.status == "done" and self.contribute_enabled(),
                 "can_undo": job.id == last_applied and not self.editable and job.version == __version__,
+                "can_cancel": job.status in ("queued", "triage", "running", "waiting", "login"),
+                "cancelling": job.id in self._cancelled,
                 "engine": job.engine, "model": job.model, "effort": job.effort}
 
     def snapshot(self) -> dict:
@@ -1143,6 +1191,8 @@ class EvolveManager(QObject):
                                                                        "why", "duplicate_of", "risks")}}
                           for k, v in community_items] if info.get("push") else [],
             "community_checking": self._checking_community,
+            "community_checked": self.state.get("last_triage", 0),
+            "community_error": self.state.get("community_error", ""),
         }
 
 

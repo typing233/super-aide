@@ -102,6 +102,21 @@ EN = {
     "连接成功，找到 {n} 个模型": "Connected, found {n} models",
     "连接成功": "Connected",
     "请填写密钥": "Please enter the key",
+    "连接成功，{model} 能用": "Connected, {model} works",
+    "用 {model} 试了一下，服务报错：{reason}": "Tried {model}; the service returned an error: {reason}",
+    "这个地址上没有对应的接口（返回 {code}），请检查地址":
+        "No matching API at this address (it returned {code}). Please check the address",
+    "用 {model} 试了 {seconds} 秒没有回应：这个服务可能没有这个模型，或者地址不对":
+        "No response from {model} after {seconds} s: this service may not offer that model, or the address is wrong",
+    "这个服务好像没有模型 {model}（返回 {code}：{detail}）":
+        "This service doesn't seem to offer {model} (it returned {code}: {detail})",
+    "服务地址返回 {code}：{detail}": "The endpoint returned {code}: {detail}",
+    "{problem}。这个服务提供的有：{models}": "{problem}. This service offers: {models}",
+    "这个服务没法列出模型：请在“模型”里填一个它提供的模型（看服务商的说明或请求示例），再点测试并保存":
+        "This service can't list its models. Enter a model it offers under Model (see the provider's docs or request example), then click Test and save",
+    "已保存 · {detail}": "Saved · {detail}",
+    "；默认模型换成了 {model}（这个服务没有原来的 {old}）": "; the default model is now {model} (this service doesn't offer {old})",
+    "；用的时候出错，再回来检查密钥": "; if it fails when used, come back and check the key",
     "没法自动修改 {path}（{error}），请手动配置": "Couldn't edit {path} automatically ({error}). Please set it up by hand",
     "Codex 没能保存 API Key（{error}）": "Codex couldn't save the API key ({error})",
     "{path} 不是有效的 JSON，没有改动它（{error}）": "{path} isn't valid JSON, so it wasn't changed ({error})",

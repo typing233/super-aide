@@ -2,8 +2,9 @@
 
 Super Aide 自己不存密钥，都写进工具自己的配置里，和你手动配的效果一样：
 - Claude Code：~/.claude/settings.json 的 env（ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN；官方 API 用 ANTHROPIC_API_KEY）。
-- Codex：~/.codex/config.toml 里加一个服务商（model_providers.super_aide），密钥放在用户环境变量里
-  （Codex 按服务商的 env_key 从环境变量取密钥）；官方 API Key 用 `codex login --with-api-key` 存。
+- Codex：~/.codex/config.toml 里加一个服务商（model_providers.super_aide），密钥写在服务商的 experimental_bearer_token 里；
+  官方 API Key 用 `codex login --with-api-key` 存。原来放在用户环境变量里（服务商的 env_key），可已经开着的 Codex 桌面版、
+  VS Code 插件、终端拿不到新变量，一用就报 "Missing environment variable"（2026-10-10 实测），现在不用环境变量了。
 - DeepSeek Harness：账号在它自己的界面里登录（没有命令行登录）；API Key 放在用户环境变量 DEEPSEEK_API_KEY。
 改文件之前各留一份备份（*.super-aide.bak），只改这几项，别的设置和注释原样保留。
 """
@@ -15,6 +16,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 import tomllib
 import urllib.error
 import urllib.request
@@ -28,7 +30,14 @@ from .detect import NAMES, Places, Report, claude_dir, codex_dir, dsh_desktop
 log = logging.getLogger(__name__)
 
 CODEX_PROVIDER = "super_aide"
-CODEX_KEY_ENV = "SUPER_AIDE_CODEX_API_KEY"
+CODEX_KEY_ENV = "SUPER_AIDE_CODEX_API_KEY"  # 以前放密钥的用户环境变量：保存时顺手删掉
+PROBE_TIMEOUT = 30  # 服务列不出模型时，用你填的模型真发一个很小的请求，最多等这么久（秒）
+#: 流式回答里看得出成败的事件：模型开始写了算成；报错、失败算不成。只看到"开始了"不算：
+#: 实测有的中转先回 response.created，过几秒才发 error（服务器过载）
+STREAM_OK = ("response.output_item.added", "response.content_part.added", "response.output_text.delta",
+             "response.reasoning_summary_text.delta", "response.completed")
+STREAM_FAILED = ("error", "response.failed", "response.incomplete")
+STREAM_ERROR = 599  # _post 用它表示"流里报了错"
 CLAUDE_OFFICIAL = "https://api.anthropic.com"
 OPENAI_OFFICIAL = "https://api.openai.com/v1"
 DEEPSEEK_OFFICIAL = "https://api.deepseek.com"
@@ -109,10 +118,23 @@ def openai_base(url: str) -> str:
     return url
 
 
+def _open(req: urllib.request.Request, timeout: float):
+    """打开请求；连接刚连上就被掐断（中转服务偶尔这样，比如 SSL 握手时断开）就隔半秒再试一次，超时不重试。"""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, ConnectionError, OSError) as e:
+        if isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError):
+            raise
+        time.sleep(0.5)
+        return urllib.request.urlopen(req, timeout=timeout)
+
+
 def _list(url: str, headers: dict[str, str], timeout: float) -> Check:
     req = urllib.request.Request(url, headers={**headers, "User-Agent": "super-aide-setup"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _open(req, timeout) as resp:
             data = json.loads(resp.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
@@ -143,29 +165,132 @@ def check_openai(base: str, key: str, timeout: float = 15) -> Check:
     return _list(f"{root}/models", {"Authorization": f"Bearer {key}"}, timeout)
 
 
-def check(tool: str, base: str, key: str) -> Check:
-    if not key.strip():
+def _read_stream(resp, deadline: float) -> tuple[int, str]:
+    """一行行读流式回答，读到第一个看得出成败的事件就停（不等它写完）。"""
+    for raw in resp:
+        line = raw.decode("utf-8", "replace").strip()
+        if line.startswith("data:"):
+            try:
+                event = json.loads(line[5:])
+            except ValueError:
+                event = {}
+            kind = str(event.get("type", "")) if isinstance(event, dict) else ""
+            if kind in STREAM_FAILED:
+                error = event.get("error") or (event.get("response") or {}).get("error") or {}
+                return STREAM_ERROR, json.dumps(error, ensure_ascii=False)
+            if kind in STREAM_OK:
+                return resp.status, kind
+        if time.monotonic() > deadline:
+            break
+    return -1, ""  # 开了头却一直等不到结果：当没回应
+
+
+def _post(url: str, headers: dict[str, str], body: dict, timeout: float) -> tuple[int, str]:
+    """发一个 JSON 请求，返回 (状态码, 响应开头)。连不上是 (0, 原因)，超时是 (-1, "")，流里报了错是 (STREAM_ERROR, 错误)。"""
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST", headers={
+        **headers, "Content-Type": "application/json", "User-Agent": "super-aide-setup"})
+    try:
+        with _open(req, timeout) as resp:
+            if "event-stream" in (resp.headers.get("Content-Type") or ""):
+                return _read_stream(resp, time.monotonic() + timeout)
+            return resp.status, resp.read(2000).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            text = e.read(2000).decode("utf-8", "replace")
+        except OSError:
+            text = ""
+        return e.code, text
+    except TimeoutError:
+        return -1, ""
+    except (urllib.error.URLError, ConnectionError, OSError) as e:
+        reason = getattr(e, "reason", e)
+        return (-1, "") if isinstance(reason, TimeoutError) else (0, str(reason))
+
+
+def _probe(url: str, headers: dict[str, str], body: dict, model: str, timeout: float) -> Check:
+    """用你填的模型真发一个很小的请求：密钥、地址、模型都对才算过（服务列不出模型时只能这样确认）。"""
+    code, text = _post(url, headers, body, timeout)
+    if 200 <= code < 300:
+        return Check(True, tr("连接成功，{model} 能用", model=model), [model], True)
+    if code == STREAM_ERROR:
+        try:
+            error = json.loads(text) if text else {}
+        except ValueError:
+            error = {}
+        error = error if isinstance(error, dict) else {}
+        reason = " ".join(str(error.get("message") or text or "-").split())[:160]
+        kind = error.get("code") or error.get("type") or ""
+        return Check(False, tr("用 {model} 试了一下，服务报错：{reason}", model=model,
+                               reason=f"{reason}（{kind}）" if kind else reason))
+    if code in (401, 403):
+        return Check(False, tr("密钥不对（服务地址返回 {code}）", code=code))
+    if code in (404, 405):
+        return Check(False, tr("这个地址上没有对应的接口（返回 {code}），请检查地址", code=code))
+    if code == -1:
+        return Check(False, tr("用 {model} 试了 {seconds} 秒没有回应：这个服务可能没有这个模型，或者地址不对",
+                               model=model, seconds=int(timeout)))
+    if code == 0:
+        return Check(False, tr("连不上这个地址（{reason}）", reason=text))
+    detail = " ".join(text.split())[:160]
+    if code in (400, 422) and "model" in text.lower():
+        return Check(False, tr("这个服务好像没有模型 {model}（返回 {code}：{detail}）", model=model, code=code, detail=detail))
+    return Check(False, tr("服务地址返回 {code}：{detail}", code=code, detail=detail or "-"))
+
+
+def probe_openai(base: str, key: str, model: str, timeout: float = PROBE_TIMEOUT) -> Check:
+    """和 Codex 一样走 Responses 接口、流式。"""
+    root = openai_base(base) or OPENAI_OFFICIAL
+    return _probe(f"{root}/responses", {"Authorization": f"Bearer {key}"},
+                  {"model": model, "input": "ping", "stream": True}, model, timeout)
+
+
+def probe_claude(base: str, key: str, model: str, timeout: float = PROBE_TIMEOUT) -> Check:
+    root = claude_base(base) or CLAUDE_OFFICIAL
+    return _probe(f"{root}/v1/messages", {"x-api-key": key, "Authorization": f"Bearer {key}",
+                                          "anthropic-version": "2023-06-01"},
+                  {"model": model, "max_tokens": 16, "messages": [{"role": "user", "content": "ping"}]}, model, timeout)
+
+
+def check(tool: str, base: str, key: str, model: str = "") -> Check:
+    """测试连接：先列模型；列不出来（不少中转服务不支持）或者你填的模型不在里面，就用你填的模型真发一个很小的请求。
+    Codex 列不出模型时一定要填模型：Codex 原来的默认模型多半是上一个服务商的，换过来就用不了。"""
+    key, model = key.strip(), model.strip()
+    if not key:
         return Check(False, tr("请填写密钥"))
-    if tool == "claude":
-        return check_claude(base, key.strip())
     if tool == "dsh":
-        return check_openai(DEEPSEEK_OFFICIAL, key.strip())  # DeepSeek 官方 API 的模型列表
-    return check_openai(base, key.strip())
+        return check_openai(DEEPSEEK_OFFICIAL, key)  # DeepSeek 官方 API 的模型列表
+    listed = check_claude(base, key) if tool == "claude" else check_openai(base, key)
+    if listed.verified and (not model or model in listed.models):
+        return listed
+    if model:
+        probe = probe_claude(base, key, model) if tool == "claude" else probe_openai(base, key, model)
+        if probe.ok or not listed.verified:
+            return probe
+        sample = tr("、").join(listed.models[:8])
+        return Check(False, tr("{problem}。这个服务提供的有：{models}", problem=probe.message, models=sample))
+    if listed.ok and tool == "codex":
+        return Check(False, tr("这个服务没法列出模型：请在“模型”里填一个它提供的模型（看服务商的说明或请求示例），"
+                               "再点测试并保存"))
+    return listed  # 连不上、密钥不对；或者 Claude 列不出模型（Claude Code 会用它自己的默认模型）
 
 
 # ---------- 自定义服务地址：写配置 ----------
 
-def save(tool: str, base: str, key: str, model: str = "", places: Places | None = None) -> None:
+def save(tool: str, base: str, key: str, model: str = "", places: Places | None = None,
+         offered: list[str] | None = None) -> tuple[str, str]:
+    """写进工具自己的配置。offered：服务列出来的模型（列不出来就是空）。
+    返回 (实际用的默认模型, 换掉的原默认模型)：你没填、原来的默认模型这个服务又不提供时，会换成它提供的最强的那个。"""
     p = places or Places.current()
     key, model = key.strip(), model.strip()
     if not key:
         raise ConfigError(tr("请填写密钥"))
     if tool == "claude":
         save_claude(claude_dir(p) / "settings.json", base, key, model)
-    elif tool == "dsh":
+        return model, ""
+    if tool == "dsh":
         winenv.set_user_env("DEEPSEEK_API_KEY", key)  # DSH 的 deepseek-official 服务商从这里取
-    else:
-        save_codex(codex_dir(p) / "config.toml", base, key, model)
+        return "", ""
+    return save_codex(codex_dir(p) / "config.toml", base, key, model, offered or [])
 
 
 def save_claude(path: Path, base: str, key: str, model: str = "") -> None:
@@ -184,10 +309,21 @@ def save_claude(path: Path, base: str, key: str, model: str = "") -> None:
     _write(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
-def save_codex(path: Path, base: str, key: str, model: str = "") -> None:
+def save_codex(path: Path, base: str, key: str, model: str = "", offered: list[str] | None = None) -> tuple[str, str]:
+    """返回 (实际用的默认模型, 换掉的原默认模型)，见 save。"""
     text = path.read_text(encoding="utf-8") if path.exists() else ""
     root = openai_base(base)
     official = not root or root == OPENAI_OFFICIAL
+    replaced = ""
+    if not model and offered:
+        try:
+            current = str(tomllib.loads(text).get("model") or "") if text else ""
+        except tomllib.TOMLDecodeError:
+            current = ""
+        if current not in offered:  # 原来的默认模型是上一个服务商的：换成这个服务提供的最强的那个
+            from .flow import strongest
+
+            model, replaced = strongest("codex", offered), current
     if official:
         text = set_top_key(text, "model_provider", "openai")
     else:
@@ -196,7 +332,7 @@ def save_codex(path: Path, base: str, key: str, model: str = "") -> None:
             f"[model_providers.{CODEX_PROVIDER}]\n"
             'name = "Custom"\n'
             f"base_url = {json.dumps(root)}\n"
-            f'env_key = "{CODEX_KEY_ENV}"\n'
+            f"experimental_bearer_token = {json.dumps(key)}\n"
             'wire_api = "responses"\n'))
     if model:
         text = set_top_key(text, "model", model)
@@ -206,10 +342,11 @@ def save_codex(path: Path, base: str, key: str, model: str = "") -> None:
         raise ConfigError(tr("没法自动修改 {path}（{error}），请手动配置", path=path, error=e)) from e
     if official:
         _login_api_key(key)
-    else:
-        winenv.set_user_env(CODEX_KEY_ENV, key)
     _backup(path)
     _write(path, text)
+    if not official:
+        winenv.delete_user_env(CODEX_KEY_ENV)  # 以前版本放密钥的环境变量：密钥已经在配置里了
+    return model, replaced
 
 
 def _login_api_key(key: str) -> None:

@@ -248,13 +248,21 @@ class SetupWindow(WebWindow):
                          name="setup-save", daemon=True).start()
 
     def _save_worker(self, tool: str, base: str, key: str, model: str) -> None:
-        result = configure.check(tool, base, key)
+        result = configure.check(tool, base, key, model)
+        used = model.strip()
+        message = result.message
         if result.ok:
             try:
-                configure.save(tool, base, key, model)
+                used, replaced = configure.save(tool, base, key, model, offered=result.models if result.verified else [])
+                # 写明"已保存"：原来成功了也只显示一句"连上了，但没法提前确认密钥"，读起来像没生效
+                message = tr("已保存 · {detail}", detail=result.message)
+                if replaced:
+                    message += tr("；默认模型换成了 {model}（这个服务没有原来的 {old}）", model=used, old=replaced)
+                elif not result.verified and tool != "dsh":
+                    message += tr("；用的时候出错，再回来检查密钥")
             except (configure.ConfigError, OSError) as e:
-                result = configure.Check(False, str(e))
-        self.checked.emit(tool, {"ok": result.ok, "message": result.message, "model": model.strip()})
+                result, message = configure.Check(False, str(e)), str(e)
+        self.checked.emit(tool, {"ok": result.ok, "message": message, "model": used})
 
     def _on_checked(self, tool: str, result: dict) -> None:
         if result["ok"]:

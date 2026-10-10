@@ -45,6 +45,13 @@
   max-width: 420px;
 }
 
+.tool .label small.confirmed {
+  color: var(--ok);
+  white-space: normal; /* 保存的结果要看全：哪个模型能用、默认模型换成了什么 */
+  user-select: text;
+  cursor: text;
+}
+
 .tool .label small.error {
   color: var(--err);
   white-space: normal;

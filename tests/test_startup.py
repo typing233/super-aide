@@ -86,3 +86,22 @@ def test_autostart_command_is_quiet_and_upgrade_only_touches_its_own_entry(monke
     monkeypatch.setattr(autostart, "_stored", lambda: autostart.command())
     autostart.upgrade()      # 已经是新的：不动
     assert written == []
+
+
+def test_notifications_say_the_app_name_not_python(monkeypatch):
+    """不登记的话，系统通知上写的是"来自 Python"。名字跟着界面语言。"""
+    from contextlib import nullcontext
+
+    from super_aide import app, i18n
+
+    written = {}
+    monkeypatch.setattr(app.winreg, "CreateKey", lambda root, path: written.setdefault("path", path) and nullcontext())
+    monkeypatch.setattr(app.winreg, "SetValueEx", lambda key, name, _r, _t, value: written.__setitem__(name, value))
+    i18n.set_language("zh")
+    app.register_identity()
+    assert written["path"].endswith(r"AppUserModelId\Typing233.SuperAide") and written["DisplayName"] == "超级助手"
+    assert written["IconUri"].endswith("super_aide.ico")
+    i18n.set_language("en")
+    app.register_identity()
+    assert written["DisplayName"] == "Super Aide"
+    i18n.set_language("zh")

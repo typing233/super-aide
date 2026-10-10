@@ -98,3 +98,42 @@ def test_switching_models_recomputes(lib):
 def test_gist_keeps_question_and_errors_only():
     s = Situation(question="为什么", text="import torch\n" * 50 + "ModuleNotFoundError: No module named 'torch'")
     assert s.gist() == "为什么\nModuleNotFoundError: No module named 'torch'"
+
+
+def test_idle_embedder_is_unloaded_and_reloaded_on_summon(monkeypatch, tmp_path):
+    """向量模型占常驻内存的三成左右：闲了 10 分钟卸掉，召唤时在后台重新加载。"""
+    import time as _time
+    from types import SimpleNamespace
+
+    from super_aide.engines import hub as hub_module
+    from super_aide.engines.hub import EngineHub
+    from super_aide.experience.embed import Embedder
+
+    emb = Embedder(root=tmp_path)
+    assert not emb.unload()                       # 没加载：没什么可卸的
+    emb._session, emb._tokenizer = object(), object()
+    with emb._lock:                               # 正在加载（别的线程拿着锁）：不等它
+        assert not emb.unload()
+    assert emb.unload() and not emb.loaded()
+
+    loads = []
+    semantic = SimpleNamespace(embedder=emb, ready=lambda: loads.append(1))
+    hub = SimpleNamespace(semantic=semantic, conversations={}, _embed_used=0.0)
+    monkeypatch.setattr(emb, "downloaded", lambda: True)
+    EngineHub.prewarm(hub)                        # 召唤了：在后台加载
+    for _ in range(50):
+        if loads:
+            break
+        _time.sleep(0.01)
+    assert loads == [1] and _time.time() - hub._embed_used < 5
+
+    emb._session, emb._tokenizer = object(), object()
+    EngineHub.unload_idle(hub)                    # 刚用过：不卸
+    assert emb.loaded()
+    hub._embed_used = _time.time() - hub_module.EMBED_IDLE_S - 1
+    hub.conversations = {"k": SimpleNamespace(busy=True)}
+    EngineHub.unload_idle(hub)                    # 正在答：不卸
+    assert emb.loaded()
+    hub.conversations = {}
+    EngineHub.unload_idle(hub)
+    assert not emb.loaded()

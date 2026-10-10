@@ -52,3 +52,16 @@ def set_user_env(name: str, value: str) -> None:
         winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
     os.environ[name] = value
     _broadcast()
+
+
+def delete_user_env(name: str) -> bool:
+    """删掉一个用户环境变量（没有就算了）。返回删没删。"""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_WRITE) as key:
+            winreg.DeleteValue(key, name)
+    except FileNotFoundError:
+        os.environ.pop(name, None)
+        return False
+    os.environ.pop(name, None)
+    _broadcast()
+    return True

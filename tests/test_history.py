@@ -106,3 +106,26 @@ def test_stopped_turns_say_stopped_not_the_engine_diagnostic(sessions):
                                      "error": diag}]})
     assert history.summaries()[0]["preview"] == "已停止"
     assert history.load(folder.name)["turns"][0]["error"] == "已停止"
+
+
+def test_delete_can_be_undone_then_is_gone_for_good(sessions):
+    keep = make(sessions, "20261010-090000-aaaa", "留着的", "回答")
+    a = make(sessions, "20261010-091000-bbbb", "删掉的 1", "回答")
+    b = make(sessions, "20261010-092000-cccc", "删掉的 2", "回答")
+    assert history.delete([a.name, b.name, "../evil", "20261010-099999-zzzz"]) == [a.name, b.name]
+    assert [i["id"] for i in history.summaries()] == [keep.name]  # 列表里马上没了
+    assert history.restore([a.name]) == [a.name]                    # 撤销：挪回来
+    assert sorted(i["id"] for i in history.summaries()) == [keep.name, a.name]
+    assert history.load(a.name)["turns"][0]["question"] == "删掉的 1"
+    assert history.empty_trash(older_than_s=3600) == 0               # 撤销时间里不真删
+    assert history.empty_trash(older_than_s=0) == 1 and history.restore([b.name]) == []  # 过了时间：真删了
+    assert not (sessions / history.TRASH / b.name).exists()
+
+
+def test_prune_also_empties_old_trash(sessions):
+    gone = make(sessions, "20261010-093000-dddd", "q", "a")
+    history.delete([gone.name])
+    old = time.time() - 2 * history.UNDO_S
+    os.utime(sessions / history.TRASH / gone.name, (old, old))
+    history.prune()
+    assert not (sessions / history.TRASH / gone.name).exists()

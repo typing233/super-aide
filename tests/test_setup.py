@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import tomllib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -11,6 +12,13 @@ import pytest
 
 from super_aide import config
 from super_aide.setup import configure, detect, flow, install
+
+
+@pytest.fixture(autouse=True)
+def no_real_env(monkeypatch):
+    """不碰这台机器真实的用户环境变量（保存配置时会删以前版本放密钥的那个）。"""
+    monkeypatch.setattr(configure.winenv, "set_user_env", lambda name, value: None)
+    monkeypatch.setattr(configure.winenv, "delete_user_env", lambda name: False)
 
 
 @pytest.fixture
@@ -212,21 +220,23 @@ def test_save_claude_refuses_broken_json(tmp_path):
 
 
 def test_save_codex_adds_provider_and_keeps_the_rest(tmp_path, monkeypatch):
-    saved = {}
-    monkeypatch.setattr(configure.winenv, "set_user_env", lambda name, value: saved.update({name: value}))
+    deleted = []
+    monkeypatch.setattr(configure.winenv, "set_user_env", lambda name, value: pytest.fail("不该再写环境变量"))
+    monkeypatch.setattr(configure.winenv, "delete_user_env", lambda name: deleted.append(name))
     original = ('# 我的配置\nmodel = "gpt-6-astra"\nmodel_provider = "old"\n\n[model_providers.old]\n'
                 'base_url = "https://old.example.com/v1"\nenv_key = "OLD"\n\n[features]\nfoo = true # 注释\n')
     path = write(tmp_path / "config.toml", original)
-    configure.save_codex(path, "https://relay.example.com", "k", "gpt-6-sol")
+    assert configure.save_codex(path, "https://relay.example.com", 'k"\\x', "gpt-6-sol") == ("gpt-6-sol", "")
     text = path.read_text(encoding="utf-8")
     data = tomllib.loads(text)
     assert data["model_provider"] == configure.CODEX_PROVIDER and data["model"] == "gpt-6-sol"
+    # 密钥写在服务商里：已经开着的 Codex 桌面版、VS Code 插件也读得到（环境变量要重开程序才有）
     assert data["model_providers"][configure.CODEX_PROVIDER] == {
-        "name": "Custom", "base_url": "https://relay.example.com/v1", "env_key": configure.CODEX_KEY_ENV,
+        "name": "Custom", "base_url": "https://relay.example.com/v1", "experimental_bearer_token": 'k"\\x',
         "wire_api": "responses"}
     assert data["model_providers"]["old"]["env_key"] == "OLD" and data["features"] == {"foo": True}
     assert "# 我的配置" in text and "# 注释" in text
-    assert saved == {configure.CODEX_KEY_ENV: "k"}
+    assert deleted == [configure.CODEX_KEY_ENV]  # 以前版本放密钥的环境变量顺手删掉
     # 再配一次：替换同一张表，不重复
     configure.save_codex(path, "https://other.example.com/v1", "k2")
     text = path.read_text(encoding="utf-8")
@@ -246,6 +256,30 @@ class FakeService(BaseHTTPRequestHandler):
     status = 200
     body = {"data": [{"id": "claude-opus-5-5"}, {"id": "gpt-6-astra"}]}
     seen: list[dict] = []
+    post_status = 200
+    post_body: dict = {"id": "resp_1", "type": "response"}
+    post_delay = 0
+    post_stream: list[dict] = []
+
+    def do_POST(self):  # noqa: N802
+        length = int(self.headers.get("Content-Length") or 0)
+        FakeService.seen.append({"path": self.path, **dict(self.headers), "body": json.loads(self.rfile.read(length))})
+        if self.post_delay:
+            time.sleep(self.post_delay)
+        if self.post_stream:  # 流式（SSE）：一个事件一段
+            self.send_response(self.post_status)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            for event in self.post_stream:
+                self.wfile.write(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n".encode())
+                self.wfile.flush()
+            return
+        payload = json.dumps(self.post_body).encode()
+        self.send_response(self.post_status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def do_GET(self):  # noqa: N802
         FakeService.seen.append({"path": self.path, **dict(self.headers)})
@@ -265,8 +299,32 @@ def service():
     server = HTTPServer(("127.0.0.1", 0), FakeService)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     FakeService.status, FakeService.seen = 200, []
+    FakeService.post_status, FakeService.post_body, FakeService.post_delay = 200, {"id": "resp_1", "type": "response"}, 0
+    FakeService.post_stream = []
     yield f"http://127.0.0.1:{server.server_port}"
     server.shutdown()
+
+
+def test_a_dropped_connection_is_retried_once(service, monkeypatch):
+    """中转服务偶尔刚连上就断开（SSL 握手时 EOF）：再试一次，不要一次抖动就说连不上。"""
+    import ssl
+    import urllib.error
+
+    real, calls = configure.urllib.request.urlopen, []
+
+    def flaky(req, timeout):
+        calls.append(req.full_url)
+        if len(calls) % 2:
+            raise urllib.error.URLError(ssl.SSLEOFError(8, "EOF occurred in violation of protocol"))
+        return real(req, timeout=timeout)
+
+    monkeypatch.setattr(configure.urllib.request, "urlopen", flaky)
+    assert configure.check("codex", service, "k").verified and len(calls) == 2
+    FakeService.status = 404
+    assert configure.check("codex", service, "k", "gpt-5.4").ok and len(calls) == 6  # 列模型、试模型各重试一次
+    monkeypatch.setattr(configure.urllib.request, "urlopen", lambda req, timeout: (_ for _ in ()).throw(
+        urllib.error.URLError(ssl.SSLEOFError(8, "EOF"))))
+    assert "连不上" in configure.check("codex", service, "k").message  # 一直断：照实说
 
 
 def test_check_lists_models(service):
@@ -282,8 +340,63 @@ def test_check_reports_bad_key_and_unlisted_service(service):
     FakeService.status = 401
     assert not configure.check("codex", service, "k").ok
     FakeService.status = 404
+    # Codex 列不出模型又没填模型：不保存，请你填一个（原来的默认模型多半是上一个服务商的）
     result = configure.check("codex", service, "k")
+    assert not result.ok and "模型" in result.message
+    result = configure.check("claude", service, "k")  # Claude Code 会用它自己的默认模型：照样保存，只是没法提前确认
     assert result.ok and not result.verified
+
+
+def test_unlisted_service_is_checked_with_the_model_you_typed(service):
+    FakeService.status, FakeService.post_status = 404, 200
+    result = configure.check("codex", service, "k", "gpt-5.4")
+    assert result.ok and result.verified and result.models == ["gpt-5.4"] and "gpt-5.4" in result.message
+    sent = FakeService.seen[-1]
+    assert sent["path"] == "/v1/responses" and sent["Authorization"] == "Bearer k"
+    assert sent["body"] == {"model": "gpt-5.4", "input": "ping", "stream": True}  # 和 Codex 一样：Responses、流式
+    result = configure.check("claude", service, "k", "claude-opus-5-5")
+    assert result.ok and FakeService.seen[-1]["path"] == "/v1/messages"
+    FakeService.post_status = 401
+    assert "密钥不对" in configure.check("codex", service, "k", "gpt-5.4").message
+    FakeService.post_status, FakeService.post_body = 400, {"error": {"message": "model gpt-9 not found"}}
+    assert "gpt-9" in configure.check("codex", service, "k", "gpt-9").message
+
+
+def test_typed_model_missing_from_the_list_is_tried_and_explained(service):
+    FakeService.status, FakeService.post_status = 200, 400
+    FakeService.post_body = {"error": {"message": "unknown model"}}
+    result = configure.check("codex", service, "k", "gpt-9")
+    assert not result.ok and "gpt-6-astra" in result.message  # 告诉你它提供哪些
+    FakeService.post_status = 200
+    assert configure.check("codex", service, "k", "gpt-9").ok  # 列表不全、但真的能用：照样过
+
+
+def test_streamed_probe_waits_for_the_model_to_start(service):
+    """实测：有的中转先回 response.created，过几秒才发 error（服务器过载）。只看到"开始了"不算能用。"""
+    FakeService.status = 404
+    started = [{"type": "response.created", "response": {"status": "in_progress"}},
+               {"type": "response.in_progress", "response": {"status": "in_progress"}}]
+    FakeService.post_stream = started + [{"type": "error", "error": {
+        "type": "service_unavailable_error", "code": "server_is_overloaded",
+        "message": "Our servers are currently overloaded. Please try again later."}}]
+    result = configure.check("codex", service, "k", "gpt-6-astra")
+    assert not result.ok and "overloaded" in result.message and "server_is_overloaded" in result.message
+    FakeService.post_stream = started + [{"type": "response.output_text.delta", "delta": "ok"}]
+    assert configure.check("codex", service, "k", "gpt-5.4").ok
+
+
+def test_unanswered_probe_times_out_with_a_hint(service):
+    FakeService.status, FakeService.post_delay = 404, 2
+    result = configure.probe_openai(service, "k", "gpt-6-astra", timeout=0.5)
+    assert not result.ok and "没有回应" in result.message
+
+
+def test_old_default_model_is_replaced_when_the_new_service_lacks_it(tmp_path):
+    path = write(tmp_path / "config.toml", 'model = "gpt-6-astra"\nmodel_provider = "old"\n')
+    used, replaced = configure.save_codex(path, "https://api.3366.example", "k", offered=["gpt-5.4-mini", "gpt-5.4"])
+    assert (used, replaced) == ("gpt-5.4", "gpt-6-astra") and tomllib.loads(path.read_text("utf-8"))["model"] == "gpt-5.4"
+    path = write(tmp_path / "config.toml", 'model = "gpt-5.4-mini"\n')  # 原来的这个服务也有：不动
+    assert configure.save_codex(path, "https://api.3366.example", "k", offered=["gpt-5.4-mini", "gpt-5.4"]) == ("", "")
 
 
 def test_check_unreachable_and_missing_key():

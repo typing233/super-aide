@@ -316,3 +316,39 @@ def test_workspace_sync_follows_the_template_but_keeps_your_edits(tmp_path, monk
     (template / "skills" / "a.md").write_text("a2\n", encoding="utf-8")
     app_module._sync_workspace()
     assert (workspace / "skills" / "a.md").read_text(encoding="utf-8") == "mine\n"
+
+
+def test_a_queued_improvement_can_be_cancelled(env):
+    mgr = env.mgr
+    mgr.hub.loop = SimpleNamespace(call_soon_threadsafe=lambda fn: fn())
+    job = mgr.jobs.get(mgr.suggest("建议")["id"])
+    assert mgr.snapshot()["items"][0]["can_cancel"]
+    mgr.cancel(job.id)
+    assert job.status == "discarded" and env.agent.calls == []  # 还没开始：直接结束，不跑模型
+
+
+def test_a_running_improvement_stops_mid_session_and_restores_the_workshop(env, monkeypatch):
+    """原来只能关掉整个自我改进让它暂停，再打开又接着做。现在点"不要了"：会话马上掐断，改到一半的还原。"""
+    mgr = env.mgr
+    mgr.hub.loop = SimpleNamespace(call_soon_threadsafe=lambda fn: fn())
+    job = mgr.jobs.get(mgr.suggest("建议")["id"])
+    app_py = mgr.workshop.root / "src" / "super_aide" / "app.py"
+    stopped, shown = [], []
+    mgr.changed.connect(lambda snap: shown.append((snap["active"] or {}).get("cancelling")))
+
+    async def slow_agent(run, prompt, session, resume, on_step):
+        app_py.write_bytes(b"def main():\n    return 'half done'\n")  # 改到一半
+        mgr.cancel(job.id)                                              # 这时你点了"不要了"
+        assert shown[-1] is True                                        # 设置里马上显示"正在停下…"
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            stopped.append(True)
+            raise
+        return Outcome(True, dict(RESULT), session=session)
+
+    monkeypatch.setattr(agent, "run_claude", slow_agent)
+    drive(mgr, job, until=("discarded", "ready", "failed"))
+    assert job.status == "discarded" and stopped == [True]
+    assert b"half done" not in app_py.read_bytes()   # 工作台还原了
+    assert mgr.snapshot()["active"] is None

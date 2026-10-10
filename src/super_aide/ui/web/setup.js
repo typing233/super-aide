@@ -11,7 +11,7 @@ const TITLE = { claude: 'Claude Code', codex: 'Codex', dsh: 'DeepSeek Harness' }
 // 界面文字都写中文，显示时经 I18N.t() 换成当前语言
 const PLACEHOLDER = {
   claude: { base: 'https://api.example.com（留空 = Anthropic 官方 API）', model: '可选，例如 claude-opus-5-5' },
-  codex: { base: 'https://api.example.com/v1（留空 = OpenAI 官方 API）', model: '可选，例如 gpt-6-astra' },
+  codex: { base: 'https://api.example.com/v1（留空 = OpenAI 官方 API）', model: '服务列不出模型时要填，例如 gpt-6-astra' },
 };
 // 自定义服务地址的表单：DeepSeek Harness 只要一个 DeepSeek API Key
 const FIELDS = {
@@ -26,6 +26,7 @@ const state = {
   forms: {},   // 打开着的自定义服务地址表单：工具 → {base, key, model, msg, cls, saving}
   typed: {},   // 这次保存成功的地址和密钥：另一个工具可以一键沿用
   changing: new Set(), // 已经配好、但点了"更改"的
+  saved: {},   // 刚保存的结果：表单收起后留在那一行下面，原来 1.4 秒就跟着表单一起消失、来不及看
 };
 
 // ---------- 基础 ----------
@@ -157,6 +158,7 @@ function toolRow(name, t) {
     }
   }
   label.append(small);
+  if (state.saved[name] && !state.forms[name]) label.append(el('small', 'confirmed', state.saved[name]));
   row.append(label);
   if (more) row.append(more);
   row.append(pill);
@@ -173,6 +175,7 @@ function setPill(pill, cls, text) {
 // ---------- 自定义服务地址 ----------
 
 function openForm(name) {
+  delete state.saved[name];
   state.forms[name] = state.forms[name] || { base: '', key: '', model: '', msg: '', cls: '' };
   render();
   const input = $(`.tool[data-tool="${name}"] [data-field="${FIELDS[name][0][0]}"]`);
@@ -245,6 +248,7 @@ function saved(name, result) {
   f.cls = result.ok ? 'ok' : 'error';
   if (result.ok) {
     state.typed[name] = { base: f.base, key: f.key };
+    state.saved[name] = result.message;
     setTimeout(() => { if (state.forms[name] && !state.forms[name].saving) closeForm(name); }, 1400);
   }
   render();

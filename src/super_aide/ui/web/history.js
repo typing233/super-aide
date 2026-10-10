@@ -8,8 +8,13 @@ const html = document.documentElement;
 const MODE_LABEL = { ask: '问答', act: '操作' }; // 显示时经 I18N.t() 换成当前语言
 const ENGINE_NAME = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek' };
 
+const UNDO_MS = 6000; // 删掉以后"撤销"留这么久
+const TRASH_ICON = '<svg viewBox="0 0 20 20"><path d="M4.5 6h11M8.2 6V4.6h3.6V6M6.2 6l.7 9.1a1.5 1.5 0 0 0 1.5 1.4h3.2a1.5 1.5 0 0 0 1.5-1.4L13.8 6"/></svg>';
+
 let bridge = null;
-const state = { items: [], current: null, conversation: null, searchTimer: null };
+// selected：Ctrl / Shift 点选出来的多条（只选了一条时就是 current）；anchor：Shift 连选的起点；undo：刚删掉、还能撤销的
+const state = { items: [], current: null, conversation: null, searchTimer: null, selected: new Set(), anchor: null,
+                undo: null, removedAt: 0 };
 
 function call(method, ...args) {
   return new Promise((resolve) => {
@@ -104,20 +109,126 @@ function renderList() {
       el('span', 'p', item.ok === false && !/^(没完成|未完成|暂未|未能|没能)/.test(item.preview)
         ? (item.preview ? I18N.t('没完成 · {preview}', { preview: item.preview }) : I18N.t('没完成')) : item.preview));
     row.title = item.question;
-    row.addEventListener('click', () => select(item.id));
+    const del = el('button', 'icon-btn del');
+    del.title = I18N.t('删除（Delete）');
+    del.innerHTML = TRASH_ICON;
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // 删掉后下一条正好移到鼠标下：顺手双击不该连删两条
+      if (performance.now() - state.removedAt < 500) return;
+      remove(state.selected.has(item.id) && state.selected.size > 1 ? [...state.selected] : [item.id]);
+    });
+    row.append(del);
+    row.addEventListener('click', (e) => pick(item.id, e));
     list.append(row);
   }
 }
 
 function markActive() {
-  for (const row of document.querySelectorAll('.item')) row.classList.toggle('active', row.dataset.id === state.current);
-  $('.item.active')?.scrollIntoView({ block: 'nearest' });
+  for (const row of document.querySelectorAll('.item')) {
+    row.classList.toggle('active', state.selected.size > 1 ? state.selected.has(row.dataset.id) : row.dataset.id === state.current);
+  }
+  $(`.item[data-id="${state.current}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+// ---------- 选择：单击看一条；Ctrl 点选加减一条，Shift 点选连着选一段（和资源管理器一样） ----------
+
+function pick(id, e) {
+  if (e.ctrlKey || e.metaKey) {
+    if (state.selected.size === 0 && state.current) state.selected.add(state.current);
+    if (state.selected.has(id) && state.selected.size > 1) state.selected.delete(id);
+    else state.selected.add(id);
+    state.anchor = id;
+    showSelection();
+  } else if (e.shiftKey && state.anchor) {
+    const ids = state.items.map((item) => item.id);
+    const [a, b] = [ids.indexOf(state.anchor), ids.indexOf(id)].sort((x, y) => x - y);
+    state.selected = new Set(a < 0 ? [id] : ids.slice(a, b + 1));
+    showSelection();
+  } else {
+    select(id);
+  }
+}
+
+function selectAll() {
+  if (!state.items.length) return;
+  state.selected = new Set(state.items.map((item) => item.id));
+  showSelection();
+}
+
+function showSelection() {
+  if (state.selected.size <= 1) {
+    select([...state.selected][0] || state.current);
+    return;
+  }
+  markActive();
+  const detail = $('#detail');
+  detail.innerHTML = '';
+  const n = state.selected.size;
+  const box = el('div', 'selection');
+  box.append(el('div', 'sel-count', I18N.t('已选 {n} 条', { n })));
+  const list = el('ul', 'sel-list');
+  const chosen = state.items.filter((item) => state.selected.has(item.id));
+  for (const item of chosen.slice(0, 6)) list.append(el('li', '', item.question));
+  if (chosen.length > 6) list.append(el('li', '', '…'));
+  const actions = el('div', 'actions');
+  const del = el('button', 'text-btn danger', I18N.t('删除这 {n} 条', { n }));
+  del.addEventListener('click', () => remove([...state.selected]));
+  const cancel = el('button', 'text-btn', I18N.t('取消选择'));
+  cancel.addEventListener('click', () => select(state.current));
+  actions.append(del, cancel);
+  box.append(list, actions);
+  detail.append(box);
+}
+
+// ---------- 删除：一下就删（不弹确认），几秒内可以撤销 ----------
+
+async function remove(ids) {
+  if (!ids.length) return;
+  const removed = JSON.parse(await call('remove', JSON.stringify(ids)) || '[]');
+  if (!removed.length) return;
+  state.removedAt = performance.now();
+  const gone = new Set(removed);
+  const order = state.items.map((item) => item.id);
+  const last = Math.max(...removed.map((id) => order.indexOf(id)));
+  const left = state.items.filter((item) => !gone.has(item.id));
+  const next = left.find((item) => order.indexOf(item.id) > last) || left[left.length - 1];
+  state.items = left;
+  renderList();
+  await select(next?.id);
+  showUndo(removed);
+}
+
+function showUndo(removed) {
+  clearTimeout(state.undo?.timer);
+  const ids = [...(state.undo?.ids || []), ...removed]; // 撤销条还在时又删了几条：一起撤销
+  const bar = $('#undo');
+  $('#undo-text').textContent = I18N.t('已删除 {n} 条', { n: ids.length });
+  bar.hidden = false;
+  state.undo = { ids, timer: setTimeout(() => {
+    bar.hidden = true;
+    state.undo = null;
+    call('purge', Math.round(UNDO_MS / 1000)); // 撤销不了了：真删掉
+  }, UNDO_MS) };
+}
+
+async function undo() {
+  const pending = state.undo;
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  state.undo = null;
+  $('#undo').hidden = true;
+  await call('restore', JSON.stringify(pending.ids));
+  await reload();
+  await select(pending.ids[0]);
 }
 
 // ---------- 详情 ----------
 
 async function select(id) {
   state.current = id || null;
+  state.selected = new Set(id ? [id] : []);
+  state.anchor = id || null;
   markActive();
   const detail = $('#detail');
   detail.innerHTML = '';
@@ -157,7 +268,10 @@ async function select(id) {
   });
   const folder = el('button', 'text-btn', I18N.t('打开会话文件夹'));
   folder.addEventListener('click', () => call('openFolder', id));
-  actions.append(copy, folder);
+  const del = el('button', 'text-btn danger-hover', I18N.t('删除'));
+  del.title = I18N.t('删除（Delete）。按住 Ctrl 或 Shift 点选，可以一次删多条');
+  del.addEventListener('click', () => remove([id]));
+  actions.append(copy, folder, del);
   detail.append(actions);
   detail.scrollTop = 0;
 }
@@ -170,6 +284,27 @@ $('#search').addEventListener('input', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+  const typing = Boolean(e.target.closest && e.target.closest('input, textarea'));
+  const mod = e.ctrlKey || e.metaKey;
+  if (e.key === 'Escape' && state.selected.size > 1) { // 先取消多选，再清空搜索、关窗口
+    select(state.current);
+    return;
+  }
+  if (!typing && e.key === 'Delete') {
+    e.preventDefault();
+    remove(state.selected.size ? [...state.selected] : (state.current ? [state.current] : []));
+    return;
+  }
+  if (!typing && mod && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    selectAll();
+    return;
+  }
+  if (mod && e.key.toLowerCase() === 'z' && state.undo && !typing) {
+    e.preventDefault();
+    undo();
+    return;
+  }
   if (e.key === 'Escape') {
     const search = $('#search');
     if (search.value) {
@@ -192,6 +327,7 @@ $('#titlebar').addEventListener('mousedown', (e) => {
   if (e.button === 0 && !e.target.closest('button, input')) call('startDrag');
 });
 $('#close').addEventListener('click', () => call('close'));
+$('#undo-btn').addEventListener('click', undo);
 
 window.historyView = { reload };
 
@@ -224,6 +360,20 @@ const preview = {
     })),
   }),
   load: (id) => JSON.stringify(PREVIEW.find((c) => c.id === id) || null),
+  remove: (ids) => {
+    const gone = JSON.parse(ids);
+    preview.trash.push(...PREVIEW.filter((c) => gone.includes(c.id)));
+    PREVIEW.splice(0, PREVIEW.length, ...PREVIEW.filter((c) => !gone.includes(c.id)));
+    return JSON.stringify(gone);
+  },
+  restore: (ids) => {
+    const back = JSON.parse(ids);
+    PREVIEW.push(...preview.trash.filter((c) => back.includes(c.id)));
+    PREVIEW.sort((a, b) => b.started.localeCompare(a.started));
+    return JSON.stringify(back);
+  },
+  purge: () => { preview.trash = []; },
+  trash: [],
 };
 
 // ---------- 启动 ----------

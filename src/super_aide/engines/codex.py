@@ -201,12 +201,13 @@ class CodexEngine:
         return result.final_response or ""
 
     async def close(self) -> None:
-        for client in self._clients.values():
+        # 先摘下来再关：关的这一会儿里预热、模型发现要客户端的，按新配置另起，拿不到正在关的旧进程
+        clients, self._clients = list(self._clients.values()), {}
+        for client in clients:
             try:
                 await client.close()
             except Exception:  # noqa: BLE001
                 pass
-        self._clients.clear()
 
     async def reload(self) -> None:
         """登录方式或服务地址改了：关掉按旧配置起的 Codex 进程，下次用时按新配置起。"""

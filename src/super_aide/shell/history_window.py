@@ -28,6 +28,20 @@ class HistoryBridge(WindowBridge):
     def load(self, session_id: str) -> str:
         return json.dumps(history.load(session_id), ensure_ascii=False)
 
+    @Slot(str, result=str)
+    def remove(self, ids: str) -> str:
+        """删掉选中的会话（可以撤销），返回真删掉了哪些。"""
+        return json.dumps(history.delete(json.loads(ids or "[]")))
+
+    @Slot(str, result=str)
+    def restore(self, ids: str) -> str:
+        return json.dumps(history.restore(json.loads(ids or "[]")))
+
+    @Slot(int)
+    def purge(self, seconds: int) -> None:
+        """撤销的提示消失了：删了超过这么多秒的真删掉。"""
+        history.empty_trash(seconds)
+
     @Slot(str)
     def copy(self, text: str) -> None:
         QGuiApplication.clipboard().setText(text)

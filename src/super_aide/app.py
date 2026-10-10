@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import winreg
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -52,6 +53,23 @@ PRUNE_EVERY_MS = 6 * 3600 * 1000  # 会话文件夹的清理：启动时一次�
 RESTART_FLAG = "--restart-after"
 kernel32.OpenProcess.restype = ctypes.c_void_p
 kernel32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
+
+
+#: 系统通知认的应用标识。不设的话通知上写的是"来自 Python"、图标也是 Python 的
+AUMID = "Typing233.SuperAide"
+AUMID_KEY = rf"Software\Classes\AppUserModelId\{AUMID}"
+
+
+def register_identity() -> None:
+    """系统通知的来源写"超级助手"（按界面语言）：给进程设应用标识，并在用户注册表里登记它的名字和图标
+    （没有开始菜单快捷方式也认）。换语言时再调一次。卸载时安装器删掉这一项。"""
+    try:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, AUMID_KEY) as key:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, app_name())
+            winreg.SetValueEx(key, "IconUri", 0, winreg.REG_SZ, str(paths.ICON))
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(ctypes.c_wchar_p(AUMID))
+    except OSError as e:
+        log.warning("登记通知用的应用标识失败：%s", e)
 
 
 def _has_console() -> bool:
@@ -261,7 +279,11 @@ class SuperAide:
         # 自我改进：没办好的时候分析、改进自己的代码；改好后通知你，你点"生效"才换包重启
         self.evolve = EvolveManager(cfg, self.hub, self.router, quit_app=app.quit, idle_ui=self._idle_ui)
         self.hub.evolve = self.evolve
-        self.ctrl.on_use = self.evolve.touched
+        self.ctrl.on_use = self._on_use
+        # 本地向量模型闲着时卸掉（召唤时再在后台加载）：常驻内存少约 160MB
+        self.embed_timer = QTimer(app)
+        self.embed_timer.timeout.connect(self.hub.unload_idle)
+        self.embed_timer.start(60_000)
         self.evolve.changed.connect(self._evolve_changed)
         self.evolve.notify.connect(self._evolve_notice)
         self.tray.messageClicked.connect(self._notice_clicked)
@@ -341,6 +363,11 @@ class SuperAide:
         if self.history is None:
             self.history = HistoryWindow(self.ctrl.theme)
         self.history.open()
+
+    def _on_use(self) -> None:
+        """你在用助手（召唤、提问）：自我改进挑你空下来的时候做事；本地向量模型不在内存里就先加载。"""
+        self.evolve.touched()
+        self.hub.prewarm()
 
     # ---------- 自我改进 ----------
 
@@ -430,6 +457,7 @@ class SuperAide:
     def apply_language(self) -> None:
         """设置里换了语言：托盘、回答界面、各个窗口立刻换（设置窗口自己按保存结果重画）。"""
         i18n.set_language(i18n.resolve(self.cfg.language))
+        register_identity()  # 系统通知上的名字也跟着换
         self.ctrl.panel.call("setLang", i18n.lang())
         for window in (self.settings, self.history, self.setup):
             if window is not None:
@@ -564,6 +592,7 @@ def main() -> int:
     _sync_workspace()  # 放在单实例检查之后：已经有一个在运行时，不动它正在用的扩展包
     cfg = config.load()
     i18n.set_language(i18n.resolve(cfg.language))
+    register_identity()
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)

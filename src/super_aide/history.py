@@ -25,6 +25,9 @@ KEEP_DAYS = 7
 #: 召唤了没提问（没有问答记录）的会话文件夹留这么久就删：截图和窗口文字一点用都没有了（每个约 1～2MB）。
 #: 不能太短：首问的问答记录要等这一轮答完才写，长的操作要跑好一阵
 UNUSED_HOURS = 12
+#: 在历史记录里删掉的会话先挪到这里（撤销时挪回去），过一会儿再真删
+TRASH = ".trash"
+UNDO_S = 60
 
 
 def save(folder: Path, conversation: dict) -> None:
@@ -82,6 +85,62 @@ def _shown_error(turn: dict) -> str:
     return error if turn.get("reason") == "reported" else friendly_text(error)
 
 
+def delete(session_ids: list[str]) -> list[str]:
+    """删掉这些会话（历史记录里点的删除）。先挪到回收处，撤销时能挪回来；过 UNDO_S 秒再真删。返回删掉了哪些。"""
+    trash = paths.SESSIONS / TRASH
+    done = []
+    for sid in session_ids:
+        src = folder(str(sid))
+        if src is None:
+            continue
+        dst = trash / src.name
+        try:
+            trash.mkdir(exist_ok=True)
+            if dst.exists():
+                shutil.rmtree(dst, ignore_errors=True)
+            os.replace(src, dst)
+            os.utime(dst)  # 记下删的时间：过一会儿真删
+        except OSError as e:
+            log.warning("删除会话 %s 失败：%s", sid, e)
+            continue
+        done.append(src.name)
+    empty_trash()
+    return done
+
+
+def restore(session_ids: list[str]) -> list[str]:
+    """撤销刚才的删除：从回收处挪回来。返回挪回了哪些。"""
+    back = []
+    for sid in session_ids:
+        sid = str(sid)
+        src, dst = paths.SESSIONS / TRASH / sid, paths.SESSIONS / sid
+        if not SESSION_ID.match(sid) or not src.is_dir() or dst.exists():
+            continue
+        try:
+            os.replace(src, dst)
+        except OSError as e:
+            log.warning("恢复会话 %s 失败：%s", sid, e)
+            continue
+        back.append(sid)
+    return back
+
+
+def empty_trash(older_than_s: float = UNDO_S) -> int:
+    """真删回收处里删了超过 older_than_s 秒的。返回删了几个。"""
+    trash = paths.SESSIONS / TRASH
+    if not trash.is_dir():
+        return 0
+    cutoff, gone = time.time() - older_than_s, 0
+    for path in trash.iterdir():
+        try:
+            if path.stat().st_mtime <= cutoff:
+                shutil.rmtree(path) if path.is_dir() else path.unlink()
+                gone += 1
+        except OSError as e:
+            log.warning("清理回收处 %s 失败：%s", path.name, e)
+    return gone
+
+
 def folder(session_id: str) -> Path | None:
     path = paths.SESSIONS / session_id
     return path if SESSION_ID.match(session_id) and path.is_dir() else None
@@ -101,6 +160,7 @@ def prune(keep_days: int = KEEP_DAYS, unused_hours: float = UNUSED_HOURS) -> int
     unused_hours 小时后整个删掉。返回清理了几个。"""
     if not paths.SESSIONS.exists():
         return 0
+    empty_trash()  # 历史记录里删掉、过了撤销时间的
     now = time.time()
     cutoff, unused_cutoff = now - keep_days * 86400, now - unused_hours * 3600
     cleaned = 0

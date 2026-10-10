@@ -101,12 +101,12 @@ Super Aide uses Claude Code's and Codex's own model configuration, so before you
 |---|---|
 | Claude Code or Codex is missing, and DeepSeek Harness is installed | Asks whether to install them (recommended). You can skip that and use DeepSeek Harness |
 | Something is missing and there's no DeepSeek Harness | Installs it automatically from the official npm packages, falling back to a mirror; installs a portable Node.js first if Node.js 22+ isn't there |
-| Installed but no model configured | Pick one: **Sign in with your account** (a sign-in window opens; finish in the browser) or **Custom endpoint** (address, key, optional model — tested before saving) |
+| Installed but no model configured | Pick one: **Sign in with your account** (a sign-in window opens; finish in the browser) or **Custom endpoint** (address, key, model — tested before saving; the model is required for Codex when the service can't list its models) |
 | Everything is ready | Starts right away |
 
 You can start once at least one engine works. Reopen the check any time from **Settings → General → Setup check**.
 
-A custom endpoint is written into each tool's own config (with a `*.super-aide.bak` backup; other settings and comments are kept): Claude Code → `env` in `~/.claude/settings.json`; Codex → provider `model_providers.super_aide` in `~/.codex/config.toml` with the key in the user environment variable `SUPER_AIDE_CODEX_API_KEY`; DeepSeek Harness → `DEEPSEEK_API_KEY`.
+A custom endpoint is written into each tool's own config (with a `*.super-aide.bak` backup; other settings and comments are kept): Claude Code → `env` in `~/.claude/settings.json`; Codex → provider `model_providers.super_aide` in `~/.codex/config.toml`, key included (`experimental_bearer_token`), so a Codex desktop app or VS Code extension that's already open sees it too; if the old default model isn't offered by the new service, the default switches to one it does offer; DeepSeek Harness → `DEEPSEEK_API_KEY`.
 
 ### About DeepSeek Harness
 
@@ -116,6 +116,7 @@ A custom endpoint is written into each tool's own config (with a `*.super-aide.b
 
 - **Open**: "Super Aide" in the Start menu. It has no main window and lives in the tray; when you open it, a notification says so. If you checked "Start with Windows" during install, it's ready after every boot.
 - `Alt+Q` to ask, `Alt+W` to act (changeable in Settings). The input box only appears when you press a hotkey.
+- **History** (tray menu): every question and answer, searchable. Hover an item and click the trash icon to delete it; `Ctrl`/`Shift`-click (or `Ctrl+A`) to select several, then `Delete`. You can undo for a few seconds.
 - **Settings**: hotkeys, theme, **language** (follow system / 中文 / English), apps it never looks at, which models each engine may use, autostart.
 - **Updates**: Settings → General → Version. It checks when you open Settings; click Update and Super Aide quits, the installer installs the new version and reopens it. Settings and history are kept.
 
@@ -124,7 +125,7 @@ A custom endpoint is written into each tool's own config (with a `*.super-aide.b
 - **When**: a task fails (network or sign-in problems don't count); you press `Esc` during an action and say what the assistant got wrong (no answer means it wasn't its fault); you click 👎; or you write a suggestion in **Settings → Advanced**.
 - **How**: it first checks whether this is a defect it can fix itself. If so, it changes the code in a working copy, adds tests, runs the whole test suite itself, then has a separate session review the change. By default it uses Claude Code + Opus 5.5 (maximum effort); if that isn't available, it uses the best tool and model on your PC.
 - **You apply it**: you get a notification when it's ready; open it to see what changed, then click Apply to switch to the new version (Super Aide restarts in a few seconds). If the new version doesn't start, the previous one is restored automatically, and you can undo the latest improvement at any time. The version becomes something like `0.2.0+aide.1`; official updates still show up, and afterwards your local improvements are carried over to the new version (again with your confirmation).
-- **Meanwhile**: it reminds you to keep your PC on and online, and you can keep using it. Progress shows in the first line of the tray menu and in Settings. It resumes after network drops and restarts. One improvement at a time; later ones queue and first check whether an earlier improvement already fixed them.
+- **Meanwhile**: it reminds you to keep your PC on and online, and you can keep using it. Progress shows in the first line of the tray menu and in Settings, where **Discard** (click twice) stops it right away and restores the working copy. It resumes after network drops and restarts. One improvement at a time; later ones queue and first check whether an earlier improvement already fixed them.
 - **Community contributions** (optional): Settings → Advanced → Contribute to the community, then sign in with GitHub once. Improvements that run stably for a day are submitted as pull requests under your account — code changes only, no screen content or logs; anything that looks like personal info isn't submitted automatically. The maintainer reviews before merging; see [CONTRIBUTING.md](CONTRIBUTING.md).
 - Self-improvement data lives in `~/.super_aide/evolve/`: jobs, the working copy, built packages. The conversation and logs used for analysis go only to the model service you configured and are deleted when the job ends; only the conclusion and the patch are kept.
 

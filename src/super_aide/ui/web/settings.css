@@ -613,7 +613,9 @@ textarea:focus { border-color: color-mix(in srgb, var(--a) 45%, transparent); }
   font-variant-numeric: tabular-nums;
 }
 
-.evo-actions { flex: none; display: flex; gap: 2px; }
+.evo-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.evolve-now .evo-actions:empty { display: none; }
+.evo-empty.error { color: var(--err); }
 .evo-actions .text-btn { height: 26px; padding: 0 8px; }
 
 .text-btn.danger { color: var(--err); }

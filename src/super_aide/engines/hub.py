@@ -59,6 +59,7 @@ REASK_S = 600     # 这么久之内又问了几乎一样的问题（同一个程
 DUEL_DELAY = 15   # 答完过一会儿再在后台对比，不跟你接着问抢
 EVOLVE_DELAY = 600  # 对话结束（这么久没再接着问；Ctrl+Enter 能在 10 分钟内接着问）后再交给自我改进，证据才完整
 OPEN_TIMEOUT = 90   # 打开一个引擎会话最多等这么久（秒）：Claude 冷启动约 3 秒，它自己的初始化最多等 60 秒
+EMBED_IDLE_S = 600  # 本地向量模型这么久没用就卸掉（常驻内存少约 160MB），下次召唤时在后台重新加载
 STOP_GRACE = 10     # 按 Esc 后给引擎自己停下的时间（秒），过了还在跑就直接结束这一轮
 STOPPED = {"ok": False, "stopped": True, "reason": "interrupted"}
 
@@ -199,6 +200,7 @@ class EngineHub(QObject):
         log.info("界面操作：%s", "Codex 官方的 Computer Use / Browser Use" if self.gui == "official"
                  else "自研的 Computer Use / Browser Use（两个引擎共用）")
         self.conversations: dict[str, Conversation] = {}
+        self._embed_used = time.time()
         self._last: dict[str, Conversation] = {}  # 每种模式最近一次提问（看是不是很快又问了一样的）
         self._duel_lock = asyncio.Lock()  # 后台对比一次只跑一个
         self.evolve = None  # 自我改进（EvolveManager），由外面接上
@@ -230,6 +232,20 @@ class EngineHub(QObject):
 
     def discover_models(self) -> None:
         self._submit(self._discover_models())
+
+    def prewarm(self) -> None:
+        """你召唤了助手：本地向量模型不在内存里就在后台加载（约 1.4 秒，打完问题时一般已经好了）。"""
+        self._embed_used = time.time()
+        embedder = self.semantic.embedder
+        if not embedder.loaded() and embedder.downloaded():
+            threading.Thread(target=self.semantic.ready, name="embed-load", daemon=True).start()
+
+    def unload_idle(self) -> None:
+        """本地向量模型闲了 EMBED_IDLE_S 秒就卸掉：它占了常驻内存的三成左右（约 160MB），可只在提问时才用。"""
+        if time.time() - self._embed_used < EMBED_IDLE_S or any(c.busy for c in list(self.conversations.values())):
+            return
+        if self.semantic.embedder.unload():
+            log.info("向量模型闲了 %d 分钟，先卸掉（下次召唤时重新加载）", EMBED_IDLE_S // 60)
 
     def ask(self, key: str, mode: str, question: str, snap: Snapshot, task: Task) -> None:
         conv = Conversation(key=key, mode=mode, task=task, busy=True)
@@ -629,6 +645,7 @@ class EngineHub(QObject):
     # ---- 经验 ----
 
     def _recall(self, conv: Conversation, situation: recall.Situation) -> list:
+        self._embed_used = time.time()
         """想起和这次情况相似的经验（这次对话里给过的不再给）。对不上就是空列表，首条消息里什么也不加。"""
         conv.situation = {"text": situation.text[:3000], "errors": situation.errors[:2000], "app": situation.app,
                           "url": situation.url, "title": situation.title}
