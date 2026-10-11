@@ -662,7 +662,9 @@ function renderDiff(text) {
 }
 
 function evolveItem(job) {
-  const [mark, label] = EVOLVE_STATUS[job.status] || ['none', job.status];
+  // 排着、但这次对话还没结束：信号一来就记下（这里马上看得到），对话结束再开始
+  const [mark, label] = job.held ? ['wait', '等这次对话结束（10 分钟没再接着问）再开始']
+    : EVOLVE_STATUS[job.status] || ['none', job.status];
   const item = el('div', `evo-item${state.opened.has(job.id) ? ' open' : ''}`);
   const line = el('div', 'evo-line');
   const dot = el('span', `evo-mark ${mark}`);
@@ -670,7 +672,7 @@ function evolveItem(job) {
   title.textContent = job.title || job.trigger;
   title.title = job.title || job.trigger;
   const meta = el('span', 'evo-meta');
-  meta.textContent = fmtTime(job.finished || job.created);
+  meta.textContent = job.held ? I18N.t('对话结束后开始') : fmtTime(job.finished || job.created);
   const actions = el('span', 'evo-actions');
   const pr = job.pr || {};
   if (job.status === 'ready') {
