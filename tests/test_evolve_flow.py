@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,9 +15,10 @@ from PySide6.QtCore import QCoreApplication
 from super_aide import app as app_module
 from super_aide import paths
 from super_aide.config import Config
-from super_aide.engines.hub import Conversation, EngineHub
+from super_aide.engines.hub import EVOLVE_HOLD, Conversation, EngineHub
 from super_aide.evolve import agent, manager, prompts
 from super_aide.evolve.agent import Outcome
+from super_aide.evolve.jobs import Jobs
 from super_aide.evolve.manager import EvolveManager
 from super_aide.evolve.testenv import TestEnv, TestRun
 from super_aide.router import Decision, Task
@@ -254,6 +256,21 @@ def fake_hub(evolve=None):
                            _note_trouble=lambda conv, item: conv.trouble.append(item))
 
 
+def live_hub(evolve):
+    """用引擎中枢真的攒信号、交出去的那几个方法；计时器记下来，测试里手动触发（= 这么久没再接着问）。"""
+    hub = SimpleNamespace(evolve=evolve, timers=[])
+    hub.loop = SimpleNamespace(call_later=lambda delay, fn, *a: hub.timers.append((fn, a))
+                               or SimpleNamespace(cancel=lambda: None))
+    for name in ("_note_trouble", "_schedule_evolve", "_hand_to_evolve"):
+        setattr(hub, name, getattr(EngineHub, name).__get__(hub))
+    return hub
+
+
+def conversation_ends(hub) -> None:
+    fn, args = hub.timers[-1]
+    fn(*args)
+
+
 def conv(home: Path | None = None) -> Conversation:
     c = Conversation(key="k1", mode="act", task=Task("act", "帮我卸载 XXX", "text", foreground="explorer.exe"),
                      decision=Decision(engine="claude", model="claude-opus-5-5", effort="high", reason="",
@@ -280,19 +297,90 @@ def test_stop_and_thumbs_down_reasons():
     assert c.trouble == []
     EngineHub._on_reason(hub, c, "stop", "slow", "卡在下载那一步")
     assert c.trouble[-1]["kind"] == "stopped" and c.trouble[-1]["text"] == "卡在下载那一步"
-    c.trouble.append({"kind": "thumbs_down"})
+    reasons = []
+    hub.evolve = SimpleNamespace(add_reason=lambda *a: reasons.append(a))
     EngineHub._on_reason(hub, c, "bad", "screen", "")
-    assert c.trouble[-1] == {"kind": "thumbs_down", "choice": "screen", "text": ""}
+    assert reasons == [("k1", "screen", "")]  # 👎 一点就交出去了：原因补给那个任务
 
 
 def test_hand_over_captures_the_conversation(tmp_path):
     got = []
-    hub = fake_hub(SimpleNamespace(submit=got.append))
+    hub = fake_hub(SimpleNamespace(submit=lambda data, hold=0: got.append((data, hold))))
     c = conv(tmp_path)
-    c.trouble = [{"kind": "failure", "error": "没完成：找不到卸载程序"}]
+    c.trouble = [{"kind": "failure", "error": "没完成：找不到卸载程序"}]  # 记下时就交出去了，在等对话结束
     EngineHub._hand_to_evolve(hub, c)
-    assert c.trouble == [] and got[0]["conv"] == "k1" and got[0]["question"] == "帮我卸载 XXX"
-    assert got[0]["record"][0]["trace"] == ["正在查注册表"] and got[0]["decision"]["model"] == "claude-opus-5-5"
+    data, hold = got[0]
+    assert c.trouble == [] and hold == 0 and data["conv"] == "k1" and data["question"] == "帮我卸载 XXX"
+    assert data["record"][0]["trace"] == ["正在查注册表"] and data["decision"]["model"] == "claude-opus-5-5"
+
+
+def test_a_stop_reason_shows_up_at_once_and_starts_when_the_conversation_ends(env, tmp_path):
+    """按 Esc 停下、说了原因：原来信号在内存里攒到对话结束（10 分钟没再接着问）才交出去，这期间设置里什么也看不到，
+    像是没触发，中间退出了还会丢。现在马上排上（落盘），先不开始；对话结束时按整段对话补齐证据，再开始。"""
+    mgr = env.mgr
+    hub, c = live_hub(mgr), conv(tmp_path)
+    EngineHub._on_reason(hub, c, "stop", "slow", "卡在下载那一步")
+    job = mgr.jobs.recent(1)[0]
+    assert job.kind == "stopped" and job.status == "queued" and "卡在下载那一步" in job.reason
+    view = mgr.snapshot()["items"][0]
+    assert view["held"] and view["can_cancel"]                 # 设置里马上看得到，也能"不要了"
+    assert Jobs(mgr.root).get(job.id).hold_until > time.time()  # 落盘了：中间退出也不丢
+    delay = asyncio.run(mgr._step())
+    assert job.status == "queued" and env.agent.calls == [] and 0 < delay <= EVOLVE_HOLD  # 对话还没结束：先不开始
+    c.record.append(dict(c.record[0], question="换个办法试试", answer="还是没找到"))  # 接着问了一轮
+    EngineHub._schedule_evolve(hub, c)                                               # 这一轮结束
+    assert mgr.snapshot()["items"][0]["held"] and len(mgr.jobs.items) == 1
+    conversation_ends(hub)
+    assert not mgr.snapshot()["items"][0]["held"]
+    talk = (mgr.jobs.folder(job) / "evidence" / "对话.md").read_text(encoding="utf-8")
+    assert "原因：太慢 / 卡住了；卡在下载那一步" in talk and "换个办法试试" in talk
+    asyncio.run(mgr._step())
+    assert [x["role"] for x in env.agent.calls] == ["triage"] and job.status == "running"
+
+
+def test_a_waiting_signal_does_not_hold_up_other_improvements(env, tmp_path):
+    mgr = env.mgr
+    EngineHub._note_trouble(live_hub(mgr), conv(tmp_path), {"kind": "failure", "error": "没完成：找不到卸载程序"})
+    waiting = mgr.jobs.recent(1)[0]
+    resp = mgr.suggest("回答再短一点")
+    assert resp["position"] == 1  # "收到了，马上开始"：等着对话结束的那个不算在前面
+    later = mgr.jobs.get(resp["id"])
+    asyncio.run(mgr._step())
+    assert later.status == "running" and waiting.status == "queued"
+
+
+def test_a_waiting_signal_starts_on_its_own_after_a_restart(env, tmp_path):
+    """退出又打开：对话没了，没人放行。到点了自己开始。"""
+    EngineHub._note_trouble(live_hub(env.mgr), conv(tmp_path), {"kind": "exception", "error": "KeyError: 'x'"})
+    again = EvolveManager(Config(), env.mgr.hub, env.mgr.router, quit_app=lambda: None, root=env.mgr.root)
+    job = again.jobs.recent(1)[0]
+    assert job.status == "queued" and again.snapshot()["items"][0]["held"]
+    again.jobs.update(job, hold_until=time.time() - 1)
+    asyncio.run(again._step())
+    assert job.status == "running" and env.agent.calls[0]["role"] == "triage"
+
+
+def test_discarding_a_waiting_improvement_sticks(env, tmp_path):
+    mgr = env.mgr
+    mgr.hub.loop = SimpleNamespace(call_soon_threadsafe=lambda fn: fn())
+    hub, c = live_hub(mgr), conv(tmp_path)
+    EngineHub._on_reason(hub, c, "stop", "wrong", "")
+    job = mgr.jobs.recent(1)[0]
+    mgr.cancel(job.id)
+    assert job.status == "discarded"
+    conversation_ends(hub)
+    assert [j.id for j in mgr.jobs.items] == [job.id]  # 对话结束时不会再冒出来
+
+
+def test_thumbs_down_reason_reaches_the_evidence(env, tmp_path):
+    mgr = env.mgr
+    hub, c = live_hub(mgr), conv(tmp_path)
+    EngineHub._note_trouble(hub, c, {"kind": "thumbs_down"})   # 点了 👎：马上交出去
+    EngineHub._on_reason(hub, c, "bad", "screen", "看错了窗口")  # 接着选了原因
+    job = mgr.jobs.recent(1)[0]
+    assert job.kind == "thumbs_down" and "看错了窗口" in job.reason
+    talk = (mgr.jobs.folder(job) / "evidence" / "对话.md").read_text(encoding="utf-8")
+    assert "原因：没看懂屏幕；看错了窗口" in talk                  # 模型看的是证据：原因也在里面
 
 
 # ---------- 扩展包同步：撤销回旧版本时能恢复，你改过的不覆盖 ----------

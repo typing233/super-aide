@@ -1,7 +1,8 @@
 """自我改进的任务：排队、状态，落盘在 ~/.super_aide/evolve/jobs.json（每换一个阶段都存，中断了下次接着做）。
 
 一个任务从触发到结束：
-  queued（排队）→ triage（初筛：是不是助手自己能改进的）→ running（准备、分析和修改、检查、复核、打包）
+  queued（排队；对话里的信号一来就排上，等这次对话结束才开始）→ triage（初筛：是不是助手自己能改进的）
+  → running（准备、分析和修改、检查、复核、打包）
   → ready（待生效：等你空闲时重启生效）→ applying → done
 中途可能：waiting（等网络）、login（需要登录）；结论可能是 none（无需改进）、covered（已被前面的改进覆盖）、
 held（待你处理，比如从源码运行时）、failed（没改成）、discarded（改好了但你没要）；
@@ -66,6 +67,7 @@ class Job:
     pr: dict = field(default_factory=dict)       # {number, url, dup_of, state, held}
     cost: float = 0.0          # 累计花费（美元，只记录不设上限）
     queued_after: float = 0.0  # 入队时间：轮到它时，看这之后做过的改进有没有覆盖它
+    hold_until: float = 0.0    # 排着时：这之前不开始（这次对话还没结束，见 hub._schedule_evolve）
     items: list[str] = field(default_factory=list)  # 搬迁任务：要搬的那些本地改进（任务编号，按生效先后）
 
     @property
@@ -147,8 +149,16 @@ class Jobs:
             return next((j for j in self.items if j.status in BUSY), None)
 
     def next_queued(self) -> Job | None:
+        """下一个能开始的。还在等对话结束的跳过，不挡着后面的。"""
+        now = time.time()
         with self.lock:
-            return next((j for j in self.items if j.status == "queued"), None)
+            return next((j for j in self.items if j.status == "queued" and j.hold_until <= now), None)
+
+    def held_until(self) -> float:
+        """排着、还在等对话结束的任务里，最早的那个什么时候能开始（没有就是 0）。"""
+        now = time.time()
+        with self.lock:
+            return min((j.hold_until for j in self.items if j.status == "queued" and j.hold_until > now), default=0.0)
 
     def queued(self) -> list[Job]:
         with self.lock:

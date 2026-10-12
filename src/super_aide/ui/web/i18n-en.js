@@ -258,6 +258,8 @@ window.I18N_EN = {
   '正在复核': 'Reviewing',
   '正在打包': 'Packaging',
   '排队中': 'Queued',
+  '等这次对话结束（10 分钟没再接着问）再开始': 'Starts once this chat is over (no follow-up for 10 minutes)',
+  '对话结束后开始': 'Starts after the chat',
   '正在看是不是助手的问题': "Checking whether it's the assistant's fault",
   '正在改进': 'Improving',
   '等网络恢复': 'Waiting for the network',

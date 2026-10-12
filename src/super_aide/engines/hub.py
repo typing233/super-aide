@@ -57,7 +57,9 @@ log = logging.getLogger(__name__)
 MAX_REACTIVE = 2  # 一轮里做到一半最多再想起几次（每次最多 3 条）
 REASK_S = 600     # 这么久之内又问了几乎一样的问题（同一个程序、同样的内容）：上一次多半没答好
 DUEL_DELAY = 15   # 答完过一会儿再在后台对比，不跟你接着问抢
-EVOLVE_DELAY = 600  # 对话结束（这么久没再接着问；Ctrl+Enter 能在 10 分钟内接着问）后再交给自我改进，证据才完整
+EVOLVE_DELAY = 600  # 对话结束（这么久没再接着问；Ctrl+Enter 能在 10 分钟内接着问）后自我改进才开始，证据才完整
+#: 信号马上交给自我改进，这么久之内先不开始：正常由对话结束时放行；没等到（比如中间退出了）就到点自己开始
+EVOLVE_HOLD = EVOLVE_DELAY + 60
 OPEN_TIMEOUT = 90   # 打开一个引擎会话最多等这么久（秒）：Claude 冷启动约 3 秒，它自己的初始化最多等 60 秒
 EMBED_IDLE_S = 600  # 本地向量模型这么久没用就卸掉（常驻内存少约 160MB），下次召唤时在后台重新加载
 STOP_GRACE = 10     # 按 Esc 后给引擎自己停下的时间（秒），过了还在跑就直接结束这一轮
@@ -175,7 +177,7 @@ class Conversation:
     escalate: bool = False      # 上一轮没办成：下一轮换更强的配置
     live_ui: bool = False       # 回答时看过实时屏幕、在屏幕上圈过位置：后台对比的会话没有这些工具，不比
     stopped: bool = False       # 这一轮是你按 Esc 停下的
-    trouble: list[dict] = field(default_factory=list)  # 这次对话里要交给自我改进的信号（没办成、👎、停下的原因）
+    trouble: list[dict] = field(default_factory=list)  # 交给了自我改进、在等对话结束的信号（没办成、👎、停下的原因）
     evolve_timer: object | None = None
 
 
@@ -752,7 +754,7 @@ class EngineHub(QObject):
             # 这类任务它需要别人帮忙动界面：下次同类任务直接交给能动界面的引擎更快
             self.router.record(conv.decision, conv.task, False, "delegated")
 
-    # ---- 自我改进：攒下这次对话里的信号，对话结束后交出去 ----
+    # ---- 自我改进：这次对话里的信号马上交出去，对话结束后才开始 ----
 
     def _watch_outcome(self, conv: Conversation, done: dict) -> None:
         """这一轮没办成（而且不是网络之类的故障）：记一个信号。前台被限流时告诉自我改进先让一让。"""
@@ -773,35 +775,39 @@ class EngineHub(QObject):
             if triggers.stop_counts(choice, text):  # 不答、"不是助手的问题"、"改主意了"都不算
                 self._note_trouble(conv, {"kind": "stopped", "choice": choice, "text": text})
             return
-        for item in reversed(conv.trouble):  # 👎 的原因补到那个信号上（已经交出去的，补给那个任务）
-            if item.get("kind") == "thumbs_down":
-                item.update(choice=choice, text=text)
-                return
-        if self.evolve is not None:
+        if self.evolve is not None:  # 👎 一点就交出去了：原因补给那个任务
             self.evolve.add_reason(conv.key, choice, text)
 
     def _note_trouble(self, conv: Conversation, item: dict) -> None:
         item.setdefault("t", time.time())
         conv.trouble.append(item)
-        self._schedule_evolve(conv)
+        self._schedule_evolve(conv, [item])
 
-    def _schedule_evolve(self, conv: Conversation) -> None:
+    def _schedule_evolve(self, conv: Conversation, new: list[dict] | None = None) -> None:
+        """这次对话有信号：马上交给自我改进，但先不开始；对话结束（EVOLVE_DELAY 秒没再接着问）时由
+        _hand_to_evolve 放行。原来攒到对话结束才交：这 10 分钟里设置里什么也看不到，像是没触发，中间退出还会丢。
+        接着问的每一轮结束也来这里：证据跟着更新，放行往后推。"""
         if getattr(self, "evolve", None) is None or not conv.trouble:
             return
         if conv.evolve_timer is not None:
             conv.evolve_timer.cancel()
         conv.evolve_timer = self.loop.call_later(EVOLVE_DELAY, self._hand_to_evolve, conv)
+        try:
+            self.evolve.submit(evidence.capture(conv, new or []), hold=EVOLVE_HOLD)
+        except Exception:  # noqa: BLE001 - 交不出去不影响使用
+            log.exception("交给自我改进失败")
 
     def _hand_to_evolve(self, conv: Conversation) -> None:
+        """对话结束了：按整段对话更新证据，放行。"""
         conv.evolve_timer = None
         if conv.busy:
             self._schedule_evolve(conv)
             return
-        trouble, conv.trouble = conv.trouble, []
-        if not trouble or self.evolve is None:
+        if not conv.trouble or self.evolve is None:
             return
+        conv.trouble = []
         try:
-            self.evolve.submit(evidence.capture(conv, trouble))
+            self.evolve.submit(evidence.capture(conv, []), hold=0)
         except Exception:  # noqa: BLE001 - 交不出去不影响使用
             log.exception("交给自我改进失败")
 

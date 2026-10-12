@@ -219,45 +219,65 @@ class EvolveManager(QObject):
         self.wake()
         self._changed()
 
-    def submit(self, data: dict) -> Job | None:
-        """一次对话里攒下的信号（引擎线程调用）：同一次对话里还没开始的任务就合进去，否则新建一个。"""
+    def submit(self, data: dict, hold: float = 0.0) -> Job | None:
+        """一次对话里的信号（引擎线程调用）：同一次对话里还没开始的任务就合进去（证据按最新的对话重写），否则新建一个。
+        信号一来就交（设置里马上看得到，退出了也不丢）：hold 秒之内先不开始；对话结束时 hub 按整段对话再交一次，
+        hold=0 放行。没有新信号的那几次只更新证据和等待时间。"""
         trouble = data.get("trouble") or []
-        if not trouble:
-            return None
-        kinds = [t.get("kind") for t in trouble]
-        kind = next((k for k in ("stopped", "thumbs_down") if k in kinds), "failure")  # 代码出错也算 failure
         reasons = "；".join(evidence._reason(t) for t in trouble if t.get("kind") in ("stopped", "thumbs_down")
                            and (t.get("choice") or t.get("text")))
-        first = next((t for t in trouble if t.get("error")), {})
-        sig = triggers.signature(kind, f"{data.get('foreground', '')}|{first.get('error', '')}|"
-                                       f"{data.get('question', '') if kind != 'failure' else ''}")
+        hold_until = time.time() + hold if hold > 0 else 0.0
         with self.jobs.lock:
             job = self.jobs.open_for(data.get("conv", ""))
-            if job is None:
-                job = Job(id=new_id(), kind=kind, created=time.time(), conv=data.get("conv", ""),
-                          mode=data.get("mode", ""), title=(data.get("question") or "")[:60], reason=reasons, sig=sig,
-                          queued_after=time.time())
-                self.jobs.add(job)
-            else:
+            if job is None and not trouble:
+                return None
+            if job is not None:
                 try:
                     old = json.loads((self.jobs.folder(job) / "evidence" / "raw.json").read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     old = {}
                 data["trouble"] = old.get("trouble", []) + trouble
-                self.jobs.update(job, reason="；".join(x for x in (job.reason, reasons) if x))
+            # 种类和问题指纹按这次对话到目前为止的全部信号定（停下、👎 优先）
+            kinds = [t.get("kind") for t in data["trouble"]]
+            kind = next((k for k in ("stopped", "thumbs_down") if k in kinds), "failure")  # 代码出错也算 failure
+            first = next((t for t in data["trouble"] if t.get("error")), {})
+            sig = triggers.signature(kind, f"{data.get('foreground', '')}|{first.get('error', '')}|"
+                                           f"{data.get('question', '') if kind != 'failure' else ''}")
+            if job is None:
+                job = Job(id=new_id(), kind=kind, created=time.time(), conv=data.get("conv", ""),
+                          mode=data.get("mode", ""), title=(data.get("question") or "")[:60], reason=reasons, sig=sig,
+                          queued_after=time.time(), hold_until=hold_until)
+                self.jobs.add(job)
+            else:
+                self.jobs.update(job, kind=kind, sig=sig, hold_until=hold_until,
+                                 reason="；".join(x for x in (job.reason, reasons) if x))
         evidence.write(self.jobs.folder(job), data)
-        log.info("自我改进：收到一个任务 %s（%s）%s", job.id, job.kind, job.title)
+        if trouble:
+            log.info("自我改进：收到一个任务 %s（%s）%s%s", job.id, job.kind, job.title,
+                     "，等这次对话结束再开始" if hold_until else "")
+        elif not hold_until:
+            log.info("自我改进：%s 这次对话结束了，排上队", job.id)
         self.wake()
         self._changed()
         return job
 
     def add_reason(self, conv: str, choice: str, text: str) -> None:
-        """👎 的原因来晚了（信号已经交出去）：补到那个任务上。"""
-        job = next((j for j in self.jobs.recent(20) if j.conv == conv and j.kind == "thumbs_down"), None)
-        if job is None or job.status not in ("queued", "triage"):
-            return
-        reason = evidence._reason({"choice": choice, "text": text})
-        self.jobs.update(job, reason="；".join(x for x in (job.reason, reason) if x))
+        """👎 的原因（信号已经交出去了）：补到那个任务上；还没开始的，证据里那条 👎 也补上（模型看的是证据）。"""
+        with self.jobs.lock:
+            job = next((j for j in self.jobs.recent(20) if conv and j.conv == conv), None)
+            if job is None or job.status not in ("queued", "triage"):
+                return
+            reason = evidence._reason({"choice": choice, "text": text})
+            self.jobs.update(job, reason="；".join(x for x in (job.reason, reason) if x))
+            try:
+                data = json.loads((self.jobs.folder(job) / "evidence" / "raw.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            item = next((t for t in reversed(data.get("trouble", [])) if t.get("kind") == "thumbs_down"), None)
+            if item is not None:
+                item.update(choice=choice, text=text)
+        if item is not None and job.status == "queued":
+            evidence.write(self.jobs.folder(job), data)
         self._changed()
 
     def suggest(self, text: str) -> dict:
@@ -272,7 +292,8 @@ class EvolveManager(QObject):
         log.info("自我改进：收到一条建议 %s", job.id)
         self.wake()
         self._changed()
-        position = len(self.jobs.queued()) + (1 if self.jobs.active() else 0)
+        now = time.time()  # 等着对话结束的不挡着它，不算在前面
+        position = len([j for j in self.jobs.queued() if j.hold_until <= now]) + (1 if self.jobs.active() else 0)
         return {"id": job.id, "position": position}
 
     def diff(self, job_id: str) -> str:
@@ -497,7 +518,9 @@ class EvolveManager(QObject):
             return 3600
         job = self._pick()
         if job is None:
-            return 3600
+            # 只剩等着对话结束的：正常是对话结束时放行、马上叫醒；没等到（比如中间退出过）就到点自己开始
+            held = self.jobs.held_until()
+            return max(1.0, held - time.time()) if held else 3600
         now = time.time()
         if job.retry_at > now:
             return job.retry_at - now
@@ -1164,6 +1187,7 @@ class EvolveManager(QObject):
                 and job.status == "done" and self.contribute_enabled(),
                 "can_undo": job.id == last_applied and not self.editable and job.version == __version__,
                 "can_cancel": job.status in ("queued", "triage", "running", "waiting", "login"),
+                "held": job.status == "queued" and job.hold_until > time.time(),  # 排着，等这次对话结束再开始
                 "cancelling": job.id in self._cancelled,
                 "engine": job.engine, "model": job.model, "effort": job.effort}
 
