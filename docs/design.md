@@ -639,6 +639,7 @@ DSH 是 DeepSeek 开源的智能体框架（TypeScript，桌面版或 npm 包 `@
   - 委派工具的用法
   - 你的偏好
 - **技能**：首批写 `uninstall-software`、`python-env`、`jupyter-debug`、`network-proxy`、`office-automation`、`disk-cleanup`。助手解决了新问题后，可以提议沉淀成新技能，你同意了才写入。
+  - 后来补的 `document-translation`（2026-10-10）：要把一篇英文论文翻译成中文 PDF，原来没有技能可循，助手没用现成的翻译工具，自己下了 LaTeX 源码换中文字体重新编译，MiKTeX 一直在边编译边装宏包，7 分钟还没开始翻，你按 Esc 停下。现在先用保留排版的现成工具（PDFMathTranslate），试译两页再翻全文。它的免费翻译服务会把全文经 pdf2zh 维护者的中转服务器发给硅基流动，只用在公开资料上；私人或内部的文件只交给你自己配置的服务或本机的模型，都没有就先问你，汇报里写明全文发到了哪里（截图和环境信息只发给你配置的服务，见第 11 节）。共享指令的操作模式也加了两句：有现成的成熟办法就用，要装很多东西或做很久的先拿一小部分试通；把私人或内部的文件交给你没配置过的第三方服务也算对外动作，没明确要求就先问。
   - 两边读同一个技能包 `workspace/plugin/`，结构是 `.claude-plugin/plugin.json` 加上 `skills/<名字>/SKILL.md`。
   - Claude：当本地插件加载，并打开 `skills="all"`，你自己装的技能也能用。
   - Codex：用 app-server 的 `skills/extraRoots/set` 把 `skills/` 加为技能目录。只在运行时生效，不改你的全局配置（P3 实测）。
