@@ -622,6 +622,42 @@ input::placeholder { color: var(--text-3); }
 .dock-steps::-webkit-scrollbar { width: 6px; }
 .dock-steps::-webkit-scrollbar-thumb { background: var(--hover); border-radius: 3px; }
 
+/* ---------- ⑥ 收起的回答 ---------- */
+
+/* 右下角的一小条：问题 + 悬停出现 ×。不挡事：平时淡一点，悬停才完全显出来 */
+.mini {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 300px;
+  height: 40px;
+  padding: 0 8px 0 15px;
+  border-radius: 20px;
+  font-size: 13.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.88;
+  transition: opacity 200ms var(--ease);
+}
+
+.mini:hover { opacity: 1; }
+
+.mini-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+
+.mini:hover .mini-text, .mini.fresh .mini-text { color: var(--text); }
+.mini .icon-btn { width: 24px; height: 24px; border-radius: 12px; }
+.mini:hover .icon-btn { opacity: 1; }
+
+/* 收着的时候答好了 */
+.mini-state { display: none; color: color-mix(in srgb, var(--a) 75%, var(--text)); }
+.mini.fresh .mini-state { display: inline; }
+.mini.failed .mini-state { color: var(--err); }
+
 /* ---------- 浏览器预览（不在桌面宿主里时） ---------- */
 
 body.preview {

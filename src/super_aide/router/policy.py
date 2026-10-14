@@ -14,6 +14,7 @@
    它自己有足够的真实结果（只靠先验不行）、而且能省下至少 15%，才会被选上。冷启动永远用最强的，便宜的一失败就退回。
 问答模式不在你面前试便宜的配置：答完以后在后台用便宜的配置把同一个问题再答一遍，由强模型对比（judge.py）。
 操作有副作用，不试。某一轮没办成时，同一个对话的下一轮自动换更强的配置（escalate）。
+模型服务出了问题（这个模型用不了、限流、过载、断网）：出问题的模型或整个引擎先放一边，换能用的接着做（sideline）。
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ import random
 import re
 import sys
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -79,7 +81,8 @@ UP_CONFIDENCE = 0.70
 TIE = 0.002
 LATENCY_USD_PER_S = 0.02  # 耗时折算成花费：每秒 0.02 美元（先办成，再求快）
 KIND_BIAS = 0.05       # Codex 用官方界面操作时，操作模式下前台是浏览器或桌面软件：Codex 起步高一点
-UNAVAILABLE_S = 300
+UNAVAILABLE_S = 300    # 限流、过载、断网：先歇这么久
+MODEL_DOWN_S = 1800    # 这个模型用不了（服务没提供、没开通）：歇得久一点，配置改了（重新准备）就作废
 
 #: 各类结果信号的可信度（学习权重）。"正常结束"几乎说明不了答得对不对，权重很低；失败信号（报错、汇报没完成、👎、
 #: 追问说不对、很快又问同一个问题）说明力强得多。后台对比是带参照的评审，比较可信。
@@ -101,6 +104,7 @@ class Task:
     context: str = ""   # 框选区域的原文、选中的文字（判断难度用）
     errors: str = ""    # 前台窗口里的报错行
     vec: Any = None     # 问题的向量（找相似的旧任务；向量模型没好时为空）
+    id: str = ""        # 第一次决策时分配：这个任务的决策和之后的结果信号都记在它名下（"路由表现"按它对上）
 
 
 @dataclass
@@ -118,6 +122,10 @@ class Decision:
     band: int = 0
     vec: Any = None
     candidates: list[dict] = field(default_factory=list)
+    task: str = ""          # 任务的 id（Task.id）
+    cost: float = 0.0       # 选中的配置的估算花费（美元 + 耗时折算）
+    ref: str = ""           # 最可靠的那个配置（参照）
+    ref_cost: float = 0.0   # 参照的估算花费：两者一比，就是这次比"一直用最可靠的"省了多少
 
 
 @dataclass
@@ -252,6 +260,7 @@ class EngineRouter:
             gui_official = official_codex()
         self.gui_official = gui_official  # Codex 有没有官方的界面操作（决定操作类任务的起步偏好）
         self.unavailable: dict[str, float] = {}  # 运行中报错、限流的引擎 → 时刻；5 分钟内不再选它
+        self.models_down: dict[tuple[str, str], tuple[float, float]] = {}  # (引擎, 模型) → (时刻, 歇多久)
         #: 配好了模型的引擎（准备窗口的检查结果）。None = 不限制。没配好的不参与，免得每次都去试一个打不开的引擎
         self.ready: set[str] | None = None
         self.meta_path = paths.ROUTER / "models.json"
@@ -278,22 +287,57 @@ class EngineRouter:
         catalog.save_meta(self.meta_path, self.meta)
         self.rebuild()
 
-    def mark_unavailable(self, engine: str) -> None:
-        self.unavailable[engine] = time.time()
+    def mark_unavailable(self, engine: str, model: str = "", seconds: float = UNAVAILABLE_S) -> None:
+        """引擎（或它的一个模型）先歇一会儿，这期间路由不选它。"""
+        if model:
+            self.models_down[engine, model] = (time.time(), seconds)
+        else:
+            self.unavailable[engine] = time.time()
+
+    def sideline(self, engine: str, model: str, kind: str) -> bool:
+        """这个配置因为模型服务没办成，先放一边，接下来换别的（设计 7.6 节）：
+        - model：这个模型用不了（服务没提供、没开通、中转没有它的渠道）→ 只歇这个模型，MODEL_DOWN_S 秒；
+        - auth：认证失败 → 整个引擎都用不了；
+        - service：限流、过载、断网 → 有别的引擎就整个引擎歇（多半是整个服务的问题），只有它一个就只歇这个模型
+          （中转服务常常只是某个模型的渠道挂了）。
+        歇了以后什么都用不了时不歇（歇了就谁都用不了），返回 False；返回 True = 还有别的能接着做。"""
+        saved = dict(self.unavailable), dict(self.models_down)
+        if kind == "model":
+            self.mark_unavailable(engine, model, MODEL_DOWN_S)
+        elif kind == "auth" or [e for e in self.available() if e != engine]:
+            self.mark_unavailable(engine)
+        else:
+            self.mark_unavailable(engine, model)
+        if self.available():
+            log.info("路由：%s · %s 先放一边（%s），换别的接着做", engine, model, kind)
+            return True
+        self.unavailable, self.models_down = saved
+        return False
 
     def set_ready(self, engines) -> None:
         self.ready = set(engines)
         for engine in self.ready:
             self.unavailable.pop(engine, None)  # 刚配好：之前因为没配好打不开的记录作废
+        # 刚配好的服务可能就有这些模型了
+        self.models_down = {k: v for k, v in self.models_down.items() if k[0] not in self.ready}
+        log.info("路由：可用的引擎 %s", "、".join(sorted(self.ready)) or "（没有）")
+
+    def _down(self, engine: str, model: str) -> bool:
+        since, seconds = self.models_down.get((engine, model), (0.0, 0.0))
+        return time.time() - since < seconds
+
+    def usable(self, engine: str) -> list[Profile]:
+        """这个引擎现在能选的模型（打开了，而且没在歇）。"""
+        return [p for p in self.profiles.get(engine, []) if not self._down(engine, p.id)]
 
     def available(self) -> list[str]:
         now = time.time()
-        return [e for e in ENGINES if self.profiles.get(e) and now - self.unavailable.get(e, 0) > UNAVAILABLE_S
+        return [e for e in ENGINES if self.usable(e) and now - self.unavailable.get(e, 0) > UNAVAILABLE_S
                 and (self.ready is None or e in self.ready)]
 
     def best_model(self, engine: str) -> str:
-        """这个引擎打开的模型里最强的一个（转交、后台小活用）。"""
-        found = self.profiles.get(engine) or []
+        """这个引擎能选的模型里最强的一个（转交、后台小活用）。"""
+        found = self.usable(engine)
         return min(found, key=lambda p: (p.tier, -p.skill, p.order)).id if found else ""
 
     def _profile(self, engine: str, model: str) -> Profile | None:
@@ -361,7 +405,7 @@ class EngineRouter:
 
         out = []
         for engine in engines:
-            for p in self.profiles.get(engine, []):
+            for p in self.usable(engine):
                 for effort in p.efforts:
                     prior = self._prior(p, effort, view)
                     s, f = Evidence.counts(buckets, p.engine, p.id, p.tier, EFFORTS.index(effort), tier_of)
@@ -392,6 +436,7 @@ class EngineRouter:
             engines = [pinned]
         if not engines:
             raise RuntimeError("没有可用的引擎：请在设置里至少启用一个模型")
+        task.id = task.id or uuid.uuid4().hex[:12]
         view = self.describe(task)
         try:
             decision = self._route(view, engines)
@@ -400,11 +445,12 @@ class EngineRouter:
         except Exception as e:  # noqa: BLE001 - 学习记录坏了也不能让助手答不了
             log.warning("路由出错，改用规则：%s", e)
             decision = self._rules(view, engines)
-        decision.capabilities = caps
+        decision.capabilities, decision.task = caps, task.id
         self._log("decision", task, decision)
         return decision
 
-    def _route(self, view: View, engines: list[str]) -> Decision:
+    def _pick(self, view: View, engines: list[str]) -> tuple[Scored, Scored, Scored, float, list[Scored]]:
+        """→ (选中的, 参照, 冷启动的默认, 降级的把握, 全部候选)。"""
         scored = self._score(view, engines)
         ref, default = self._reference(scored)
         chosen, confidence = ref, 0.0
@@ -417,12 +463,36 @@ class EngineRouter:
             if p >= CONFIDENCE:
                 chosen, confidence = s, p
                 break
+        return chosen, ref, default, confidence, scored
+
+    def _route(self, view: View, engines: list[str]) -> Decision:
+        chosen, ref, default, confidence, scored = self._pick(view, engines)
         top = sorted(scored, key=lambda s: (-s.mean, s.cost))[:6]
         return Decision(engine=chosen.engine, model=chosen.model, effort=chosen.effort,
                         reason=self._reason(view, chosen, ref, default, confidence, scored), mode=view.mode,
                         kind=view.kind, domain=view.domain, band=view.band, vec=view.vec,
                         candidates=[{"arm": s.name, "engine": s.engine, "quality": round(s.mean, 3),
-                                     "n": round(s.real, 1), "cost": round(s.cost, 3)} for s in top])
+                                     "n": round(s.real, 1), "cost": round(s.cost, 3)} for s in top],
+                        cost=round(chosen.cost, 4), ref=ref.name, ref_cost=round(ref.cost, 4))
+
+    def learned(self, kinds: list[tuple[str, str, str, int]]) -> list[dict]:
+        """这几类任务（模式, 类型, 子类, 难度档）现在实际会用的配置，和最可靠的那个不一样的（设置里"路由表现"列出来）：
+        cheaper = 证明了一样能办成、更省；stronger = 原来的配置在这类任务上没办成过，换成了更强的。"""
+        engines, out = self.available(), []
+        for mode, kind, domain, band in kinds if engines else []:
+            view = View(mode, kind, domain, band)
+            try:
+                chosen, ref, default, confidence, _ = self._pick(view, engines)
+            except Exception:  # noqa: BLE001 - 这类任务算不出来就不列
+                continue
+            if chosen is not ref:
+                out.append({"mode": mode, "label": view.label, "change": "cheaper", "use": chosen.name,
+                            "instead": ref.name, "confidence": round(confidence, 3),
+                            "saving": round(1 - chosen.cost / ref.cost, 3) if ref.cost else 0.0})
+            elif ref is not default:
+                out.append({"mode": mode, "label": view.label, "change": "stronger", "use": ref.name,
+                            "instead": default.name})
+        return out
 
     @staticmethod
     def _reason(view: View, chosen: Scored, ref: Scored, default: Scored, confidence: float,
@@ -470,7 +540,7 @@ class EngineRouter:
         return Decision(engine=chosen.engine, model=chosen.model, effort=chosen.effort,
                         reason=f"上一轮没办成，换更强的配置：{chosen.name}", capabilities=decision.capabilities,
                         via="escalated", mode=view.mode, kind=view.kind, domain=view.domain, band=view.band,
-                        vec=view.vec)
+                        vec=view.vec, task=decision.task)
 
     # ---------- 后台对比（只在问答模式） ----------
 
@@ -516,7 +586,7 @@ class EngineRouter:
         return Decision(engine=pick.engine, model=pick.model, effort=pick.effort,
                         reason=f"后台对比：{pick.name} 在{view.label}上能不能和 {served.name} 一样好",
                         capabilities=decision.capabilities, via="duel", mode=view.mode, kind=view.kind,
-                        domain=view.domain, band=view.band, vec=view.vec)
+                        domain=view.domain, band=view.band, vec=view.vec, task=decision.task)
 
     def record_duel(self, served: Decision, candidate: Decision, task: Task | None, verdict: Verdict) -> None:
         """两份回答都按评审结果记：只记候选的话，被对比的那份永远只有很弱的"正常结束"，比较就偏了。"""
@@ -561,7 +631,7 @@ class EngineRouter:
 
     def warm_target(self, engine: str, mode: str = "ask") -> tuple[str, str]:
         """启动时预热哪个配置：一般问题最可能用到的那个（模型, 思考强度）。"""
-        if not self.profiles.get(engine):
+        if not self.usable(engine):
             return "", ""
         try:
             d = self._route(View(mode, "qa_factual", "general", 0), [engine])
@@ -619,9 +689,10 @@ class EngineRouter:
         record = {"t": time.time(), "type": kind, "mode": task.mode, "content": task.content_kind,
                   "fg": task.foreground, "kind": decision.kind, "domain": decision.domain, "band": decision.band,
                   "engine": decision.engine, "model": decision.model, "effort": decision.effort,
-                  "via": decision.via, "explore": decision.explore, "reason": decision.reason, **(extra or {})}
+                  "via": decision.via, "explore": decision.explore, "reason": decision.reason,
+                  "task": decision.task or task.id, **(extra or {})}
         if kind == "decision":
-            record["candidates"] = decision.candidates
+            record.update(candidates=decision.candidates, cost=decision.cost, ref=decision.ref, ref_cost=decision.ref_cost)
         try:
             paths.ROUTER.mkdir(parents=True, exist_ok=True)
             with (paths.ROUTER / "decisions.jsonl").open("a", encoding="utf-8") as f:

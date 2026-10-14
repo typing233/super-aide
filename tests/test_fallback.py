@@ -30,6 +30,12 @@ class Router:
     def available(self):
         return [e for e in self.order if e not in self.unavailable]
 
+    def sideline(self, engine, model, kind):
+        if not [e for e in self.available() if e != engine]:
+            return False
+        self.unavailable.add(engine)
+        return True
+
 
 class Session:
     """ok：答完；limited：做了一步以后服务报 429。"""
@@ -63,7 +69,7 @@ class Engine:
 
 class Hub:
     _first_turn, _open, _turn = EngineHub._first_turn, EngineHub._open, EngineHub._turn
-    _avoid_after, _hand_over = EngineHub._avoid_after, EngineHub._hand_over
+    _sideline, _hand_over, _emit_route = EngineHub._sideline, EngineHub._hand_over, EngineHub._emit_route
     is_busy, _drop_sessions = EngineHub.is_busy, EngineHub._drop_sessions
 
     def __init__(self, engines):

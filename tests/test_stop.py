@@ -26,6 +26,12 @@ class Router:
     def available(self):
         return [e for e in self.order if e not in self.unavailable]
 
+    def sideline(self, engine, model, kind):
+        if not [e for e in self.available() if e != engine]:
+            return False
+        self.unavailable.add(engine)
+        return True
+
 
 class Session:
     """先报一步，然后：done 正常结束；hang 等到被打断才结束（stop_ok=False 时打断了也不理）；end 不给结果就断开。"""
@@ -69,7 +75,7 @@ class Hub:
     interrupt, is_busy = EngineHub.interrupt, EngineHub.is_busy
     _first_turn, _open, _turn = EngineHub._first_turn, EngineHub._open, EngineHub._turn
     _stop, _drop_sessions = EngineHub._stop, EngineHub._drop_sessions
-    _avoid_after, _hand_over = EngineHub._avoid_after, EngineHub._hand_over
+    _sideline, _hand_over, _emit_route = EngineHub._sideline, EngineHub._hand_over, EngineHub._emit_route
     _ask_to_stop = EngineHub.__dict__["_ask_to_stop"]
 
     def __init__(self, engines):

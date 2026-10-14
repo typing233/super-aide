@@ -164,6 +164,13 @@
 
 .meta .mode-chip { padding: 4px 8px; }
 
+/* 这一轮换了配置（加强、换模型）：问题下面一行小字 */
+.turn-meta {
+  margin: -6px 0 10px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
 .turn + .turn {
   margin-top: 22px;
   padding-top: 18px;

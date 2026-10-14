@@ -331,8 +331,8 @@ class TourWindow(QWidget):
         if step is None or not step.target:
             return "", QRect()
         if step.target in ("center", "tray"):
-            # 这两种只在回答界面收着时出现，不挡着你正在看的；贴在屏幕边上的分步骤小卡不算（它会留好几分钟）
-            if self.panel_view and self.panel_view != "dock":
+            # 这两种只在回答界面收着时出现，不挡着你正在看的；贴在屏幕边上的分步骤小卡、收起的那一条不算（会停留一阵）
+            if self.panel_view and self.panel_view not in ("dock", "mini"):
                 return "", QRect()
             if step.target == "tray":
                 if self.tray is None:

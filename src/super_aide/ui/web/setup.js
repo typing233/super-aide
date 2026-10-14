@@ -12,12 +12,13 @@ const TITLE = { claude: 'Claude Code', codex: 'Codex', dsh: 'DeepSeek Harness' }
 const PLACEHOLDER = {
   claude: { base: 'https://api.example.com（留空 = Anthropic 官方 API）', model: '可选，例如 claude-opus-5-5' },
   codex: { base: 'https://api.example.com/v1（留空 = OpenAI 官方 API）', model: '服务列不出模型时要填，例如 gpt-6-astra' },
+  dsh: { base: 'https://api.example.com/v1（留空 = DeepSeek 官方 API）', model: '填了地址就要填，可以填几个，用逗号隔开' },
 };
-// 自定义服务地址的表单：DeepSeek Harness 只要一个 DeepSeek API Key
+// 自定义服务地址的表单：三个工具一样（DeepSeek Harness 只填密钥就是 DeepSeek 官方 API）
 const FIELDS = {
   claude: [['base', '服务地址', 'text'], ['key', '密钥', 'password'], ['model', '模型', 'text']],
   codex: [['base', '服务地址', 'text'], ['key', '密钥', 'password'], ['model', '模型', 'text']],
-  dsh: [['key', 'API Key', 'password']],
+  dsh: [['base', '服务地址', 'text'], ['key', '密钥', 'password'], ['model', '模型', 'text']],
 };
 
 let bridge = null;
@@ -130,7 +131,7 @@ function toolRow(name, t) {
     setPill(pill, 'busy', I18N.t('等待登录'));
     small.textContent = I18N.t('在弹出的窗口里完成登录，好了这里会自动显示');
     actions.append(button(I18N.t('重新打开登录窗口'), 'text-btn', () => login(name)));
-    if (core) actions.append(button(I18N.t('改用自定义服务地址'), 'text-btn', () => openForm(name)));
+    actions.append(button(I18N.t('改用自定义服务地址'), 'text-btn', () => openForm(name)));
   } else if (!t.configured || state.changing.has(name)) {
     if (t.configured) {
       setPill(pill, 'ok', core ? I18N.t('已就绪') : I18N.t('可用'));
@@ -139,23 +140,17 @@ function toolRow(name, t) {
       setPill(pill, 'idle', core ? I18N.t('未配置模型') : I18N.t('未登录'));
       small.textContent = t.detail;
     }
-    if (core) {
-      actions.append(button(I18N.t('用账号登录'), 'text-btn outline', () => login(name)));
-      actions.append(button(I18N.t('自定义服务地址'), 'text-btn outline', () => openForm(name)));
-      if (state.changing.has(name) && !state.forms[name]) actions.append(button(I18N.t('取消'), 'text-btn', () => closeForm(name)));
-    } else {
-      actions.append(button(I18N.t('打开 DeepSeek Harness 登录'), 'text-btn outline', () => login(name)));
-      actions.append(button(I18N.t('填 DeepSeek API Key'), 'text-btn outline', () => openForm(name)));
-    }
+    actions.append(button(core ? I18N.t('用账号登录') : I18N.t('打开 DeepSeek Harness 登录'), 'text-btn outline',
+      () => login(name)));
+    actions.append(button(I18N.t('自定义服务地址'), 'text-btn outline', () => openForm(name)));
+    if (state.changing.has(name) && !state.forms[name]) actions.append(button(I18N.t('取消'), 'text-btn', () => closeForm(name)));
   } else {
     setPill(pill, 'ok', core ? I18N.t('已就绪') : (d.use_dsh ? I18N.t('使用中') : I18N.t('可用')));
     small.textContent = core ? t.detail : I18N.t('可选替代 · {detail}', { detail: t.detail });
-    if (core) {
-      more = button(I18N.t('更改'), 'text-btn more-btn', () => {
-        state.changing.add(name);
-        render();
-      });
-    }
+    more = button(I18N.t('更改'), 'text-btn more-btn', () => {
+      state.changing.add(name);
+      render();
+    });
   }
   label.append(small);
   if (state.saved[name] && !state.forms[name]) label.append(el('small', 'confirmed', state.saved[name]));
@@ -197,7 +192,7 @@ function customForm(name) {
     input.type = type;
     input.dataset.field = field;
     input.value = f[field] || '';
-    input.placeholder = field === 'key' ? (name === 'dsh' ? I18N.t('sk-…，在 platform.deepseek.com 创建') : I18N.t('必填'))
+    input.placeholder = field === 'key' ? (name === 'dsh' ? I18N.t('必填，DeepSeek 官方的在 platform.deepseek.com 创建') : I18N.t('必填'))
       : I18N.t(PLACEHOLDER[name][field]);
     input.spellcheck = false;
     input.autocomplete = 'off';
@@ -207,8 +202,8 @@ function customForm(name) {
     });
     form.append(label, input);
   }
-  const other = name === 'claude' ? 'codex' : 'claude';
-  if (name !== 'dsh' && state.typed[other] && !f.base && !f.key) {
+  const other = ['codex', 'claude', 'dsh'].find((n) => n !== name && state.typed[n] && state.typed[n].base);
+  if (other && !f.base && !f.key) {
     form.append(button(I18N.t('用和 {name} 一样的地址和密钥', { name: TITLE[other] }), 'text-btn copy-link', () => {
       f.base = state.typed[other].base;
       f.key = state.typed[other].key;

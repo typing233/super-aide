@@ -7,7 +7,7 @@
 const $ = (sel) => document.querySelector(sel);
 const html = document.documentElement;
 
-const VIEWS = ['input', 'card', 'pill', 'toast', 'dock'];
+const VIEWS = ['input', 'card', 'pill', 'toast', 'dock', 'mini'];
 // 界面文字都写中文，用的时候经 I18N.t() 换成当前语言
 const PLACEHOLDER = { ask: '这个报错是什么原因？', act: '帮我修好它' };
 const FOLLOWUP = { ask: '继续问…', act: '照这个帮我做' };
@@ -23,6 +23,7 @@ const REASONS = {
 };
 const PILL_NOTE_MS = 10000; // 操作中"可以继续用电脑"的提示显示这么久
 const DOCK_IDLE_MS = 10 * 60 * 1000; // 贴边的步骤 10 分钟没有交互就消失
+const CARD_IDLE_MS = 2 * 60 * 1000; // 答完的卡片这么久没动它（鼠标、键盘、滚动都没有）：收成右下角的一小条
 
 let bridge = null;
 const state = {
@@ -33,6 +34,7 @@ const state = {
   ticker: null,
   toastTimer: null,
   dockTimer: null,
+  idleTimer: null,
   pillAnim: null, // 胶囊正在展开或收起
   placeholders: {}, // 宿主给的推荐问题（已经是当前语言）；没给的用 PLACEHOLDER
   hasRecent: false,
@@ -53,6 +55,7 @@ function stopAll() {
   clearInterval(state.ticker);
   clearTimeout(state.toastTimer);
   clearTimeout(state.dockTimer);
+  clearTimeout(state.idleTimer);
   clearTimeout(live.renderTimer);
   state.ticker = null;
 }
@@ -343,7 +346,7 @@ function onEvent(ev) {
       if (state.view === 'pill') {
         $('#pill-text').textContent = ev.text;
         if ($('#pill').classList.contains('open') && !ev.transient) renderPillSteps();
-      } else if (state.view === 'card' && !live.draft) setStatus(ev.text);
+      } else if ((state.view === 'card' || state.view === 'mini') && !live.draft) setStatus(ev.text);
       break;
     }
     case 'new_message':
@@ -362,7 +365,7 @@ function onEvent(ev) {
     }
     case 'error': {
       live.error = ev.text;
-      if (state.view === 'card') setStatus(ev.text, true);
+      if (state.view === 'card' || state.view === 'mini') setStatus(ev.text, true);
       else if (state.view === 'pill') $('#pill-text').textContent = ev.text;
       break;
     }
@@ -390,14 +393,24 @@ function finish(ev) {
   if (!ev.ok && !live.error && ev.reason === 'interrupted') live.error = I18N.t('已停止');
   if (!ev.ok && !live.error && ev.error) live.error = ev.error;
   if (ev.hint) live.error = ev.hint; // 没办成的原因是环境没就绪（比如浏览器操作没接通）：直接告诉你怎么修
-  if (state.view === 'card') {
+  if (state.view === 'card' || state.view === 'mini') {
     clearTimeout(live.renderTimer);
     live.renderTimer = null;
     renderMarkdown($('#answer'), live.draft, false);
     caret.remove();
     $('#card-view').classList.remove('thinking');
     setStatus(live.error && (!live.draft || ev.hint) ? live.error : '', Boolean(live.error));
-    $('#followup').focus();
+    if (state.view === 'card') {
+      $('#followup').focus();
+      armIdle();
+    } else { // 收着的时候答完了：那一条上告诉你答好了还是没答成
+      const ok = ev.ok && !live.error;
+      const mini = $('#mini-view');
+      mini.classList.remove('thinking');
+      mini.classList.add('fresh');
+      mini.classList.toggle('failed', !ok);
+      $('#mini-state').textContent = I18N.t(ok ? '答好了' : '没答成');
+    }
   } else if (state.view === 'pill') {
     if (ev.stopped) { // 你按 Esc 停下的：问一句是不是助手哪里没做好（不答就当不是）
       showToast(I18N.t('已停止 · 是助手哪里没做好吗？'), true, true);
@@ -464,6 +477,32 @@ function dock() {
   $('#dock-title').textContent = live.question;
   show('dock');
   armDockTimer();
+}
+
+// ---------- 收起的回答：点了别处、或者好一阵没动它 ----------
+
+// 答完的卡片好一阵没动它：收起来。还在打字（追问框、原因框里有字）就不收
+function armIdle() {
+  clearTimeout(state.idleTimer);
+  if (state.view !== 'card' || !live.done) return;
+  state.idleTimer = setTimeout(() => {
+    const typing = $('#followup').value.trim() || document.activeElement?.className === 'reason-input';
+    if (state.view === 'card' && live.done && !typing) minimize();
+    else armIdle();
+  }, CARD_IDLE_MS);
+}
+
+function minimize() {
+  if (state.view !== 'card') return;
+  clearTimeout(state.idleTimer);
+  clearTimeout(live.renderTimer); // 收着的时候不画回答，展开时一次画好
+  live.renderTimer = null;
+  $('#mini-text').textContent = live.question;
+  $('#mini-text').title = live.question;
+  const mini = $('#mini-view');
+  mini.classList.toggle('thinking', !live.done);
+  mini.classList.remove('fresh', 'failed');
+  show('mini');
 }
 
 // ---------- 交互 ----------
@@ -550,6 +589,20 @@ $('#dock-expand').addEventListener('click', () => {
   else app.restore();
 });
 $('#dock-view').addEventListener('mousemove', armDockTimer);
+// 卡片：按住没有字的地方（问题那一行、四周的空白）拖动，回答长的时候挪开不挡着；回答里的字照样能选
+$('#card-view').addEventListener('mousedown', (e) => {
+  if (e.button !== 0 || e.target.closest('button, input, a, .answer, .steps, .reasons')) return;
+  if (bridge) bridge.startDrag();
+});
+for (const type of ['mousemove', 'mousedown', 'keydown', 'wheel']) {
+  $('#card-view').addEventListener(type, armIdle, { passive: true });
+}
+$('#mini-view').addEventListener('click', (e) => {
+  if (e.target.closest('#mini-close')) return;
+  if (bridge) bridge.expandMini(); // 宿主先让窗口能拿到焦点，再展开回卡片
+  else app.restore();
+});
+$('#mini-close').addEventListener('click', dismiss);
 $('#dock-steps').addEventListener('click', (e) => {
   armDockTimer();
   if (e.target.closest('pre, a, button')) return;
@@ -601,10 +654,13 @@ const app = {
   restore() {
     if (live.question) {
       show('card');
+      $('#card-view').classList.toggle('thinking', !live.done);
       renderMarkdown($('#answer'), live.draft, !live.done);
       $('#followup').focus(); // 找回来就能接着问，不用先点一下追问框
+      armIdle();
     }
   },
+  minimize,
   mode() { return state.mode; },
   submit(text = '') { submit(text); },
   setTheme(theme) { html.dataset.theme = theme; },
@@ -675,6 +731,7 @@ if (window.qt && qt.webChannelTransport && window.QWebChannel) {
     else if (action === 'toast') { setMode('act'); live.question = placeholderFor('act'); showToast('已安装 pandas，脚本运行正常'); }
     else if (action === 'stopped') { setMode('act'); live.question = placeholderFor('act'); showToast(I18N.t('已停止 · 是助手哪里没做好吗？'), true, true); }
     else if (action === 'dock') { Object.assign(live, { question: placeholderFor('ask'), draft: MOCK_ANSWER, done: true }); dock(); }
+    else if (action === 'mini') { setMode('ask'); Object.assign(live, { question: placeholderFor('ask'), draft: MOCK_ANSWER, done: true }); show('card'); minimize(); $('#mini-view').classList.add('fresh'); $('#mini-state').textContent = I18N.t('答好了'); }
     else if (action === 'theme') html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
   });
 }

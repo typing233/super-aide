@@ -11,7 +11,9 @@
 - 经验：提问时按这次的情况想起以前踩过的相似的坑（对不上就一条也不带）；对话结束后，走了弯路的总结成经验。
 - 自我改进：没办成（不算网络之类的故障）、我们自己的代码出错、你点了 👎、按 Esc 停下并说是助手的问题，
   等这次对话结束（10 分钟没再接着问）后交给自我改进（evolve），由它分析、改进超级助手自己。
-某个引擎打不开时，暂时把它排除，换另一个引擎接着做。DeepSeek Harness 是可选的替代引擎（准备窗口里选了用它才参与）。
+某个引擎打不开时，暂时把它排除，换另一个引擎接着做。模型服务出错时（这个模型用不了、限流、过载、断网），
+出问题的模型或引擎先放一边，同一问换能用的配置接着答：同一个引擎换模型时对话接着来，换了引擎就带上前面的问答。
+DeepSeek Harness 是可选的替代引擎（准备窗口里选了用它才参与）。
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import re
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,12 +43,14 @@ from ..experience.embed import Embedder
 from ..experience.semantic import Semantic
 from ..experience.store import Store
 from ..router import Decision, EngineRouter, Task, judge
+from ..router import report as route_report
 from ..router.judge import Verdict
 from ..router.policy import fg_category
 from ..snapshot.collector import Context
 from ..snapshot.collector import Session as Snapshot
 from . import browser_use, computer, prompts
-from .base import Event, friendly_error, friendly_text, reported_failure, service_reason
+from .base import (AUTH_FAILED, MODEL_UNAVAILABLE, Event, friendly_error, friendly_text, reported_failure,
+                   service_reason)
 from .claude import ClaudeEngine, claude_env
 from .claude import complete as claude_complete
 from .claude import list_models as claude_models
@@ -63,6 +68,7 @@ EVOLVE_HOLD = EVOLVE_DELAY + 60
 OPEN_TIMEOUT = 90   # 打开一个引擎会话最多等这么久（秒）：Claude 冷启动约 3 秒，它自己的初始化最多等 60 秒
 EMBED_IDLE_S = 600  # 本地向量模型这么久没用就卸掉（常驻内存少约 160MB），下次召唤时在后台重新加载
 STOP_GRACE = 10     # 按 Esc 后给引擎自己停下的时间（秒），过了还在跑就直接结束这一轮
+MAX_HANDOVERS = 2   # 模型服务出错时一问最多换几次配置（加上第一次，最多试三个）
 STOPPED = {"ok": False, "stopped": True, "reason": "interrupted"}
 
 
@@ -85,12 +91,19 @@ def _crash(e: BaseException) -> dict:
     return {"ok": False, "error": friendly_error(e), "exception": f"{type(e).__name__}: {e}"[:500]}
 
 
-def _service_error(done: dict) -> bool:
-    """没办成是因为模型服务（限流、过载、断网、认证、接口故障），换个引擎可能就好了。
-    你中途停止、环境没就绪（浏览器操作没接通）、助手自己汇报没完成都不算。"""
-    if done.get("stopped") or done.get("hint") or done.get("reason") in ("reported", "interrupted"):
-        return False
-    return triggers.is_infra(done)
+def failure_kind(done: dict) -> str:
+    """没办成是不是因为模型服务、换一个配置就可能好：model（这个模型用不了：服务没提供、没开通、中转没有它的渠道）
+    | auth（认证失败）| service（限流、过载、断网、接口故障）| ""（不是：办成了、你中途停止、环境没就绪、
+    助手自己汇报没完成、真的没做到）。"""
+    if done.get("ok") or done.get("stopped") or done.get("hint") or done.get("reason") in ("reported", "interrupted"):
+        return ""
+    text = f"{done.get('error') or ''} {done.get('exception') or ''}"
+    status = done.get("api_error_status")
+    if status == 404 or MODEL_UNAVAILABLE.search(text):
+        return "model"
+    if status in (401, 403) or AUTH_FAILED.search(text):
+        return "auth"
+    return "service" if triggers.is_infra(done) else ""
 
 
 def _shown(ev: Event) -> Event:
@@ -110,6 +123,25 @@ def _takeover_notes(conv: Conversation, failed: dict) -> list[str]:
     done = "\n".join(f"  - {s}" for s in steps[-15:])
     return [f"另一个引擎刚才做这件事做到一半，因为模型服务出错断了。它已经做过这些步骤：\n{done}\n"
             "先检查现在的状态，已经做完的不要重复做，再接着把事情做完。"]
+
+
+RECAP_TURNS = 6      # 追问时换了引擎：带上最近这么多轮问答
+RECAP_ANSWER = 1500  # 每轮回答最多带这么多字
+
+
+def _recap_notes(conv: Conversation) -> list[str]:
+    """追问时原来的引擎出错、换了一个新开的会话：它没见过前面的对话，把最近几轮问答交给它。"""
+    turns = [t for t in conv.record if t.get("question")][-RECAP_TURNS:]
+    if not turns:
+        return []
+    lines = []
+    for t in turns:
+        answer = str(t.get("answer") or "（没有回答）")
+        if len(answer) > RECAP_ANSWER:
+            answer = answer[:RECAP_ANSWER] + "…"
+        lines.append(f"问：{t['question']}\n答：{answer}")
+    return ["这是一次接着进行的对话。前面由另一个引擎回答，它的模型服务出错了，换你接着答。之前的问答：\n"
+            + "\n\n".join(lines)]
 
 
 SPECIFIC = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.\-:/\\]*")
@@ -234,6 +266,23 @@ class EngineHub(QObject):
 
     def discover_models(self) -> None:
         self._submit(self._discover_models())
+
+    def router_report(self, done: Callable[[dict], None]) -> None:
+        """设置里的"路由表现"（router/report.py）。读记录文件在后台线程里做（不耽误正在回答的），
+        算"学到的"在引擎线程里做（路由的读写都在这个线程），算完交给 done。"""
+        def run(records: list[dict]) -> None:
+            try:
+                result = route_report.build(self.router, records)
+            except Exception as e:  # noqa: BLE001 - 算不出来设置里就不显示这一块
+                log.warning("路由表现算不出来：%s", e)
+                result = {}
+            done(result)
+
+        def read() -> None:
+            records = route_report.read()
+            self.loop.call_soon_threadsafe(run, records)
+
+        threading.Thread(target=read, name="router-report", daemon=True).start()
 
     def prewarm(self) -> None:
         """你召唤了助手：本地向量模型不在内存里就在后台加载（约 1.4 秒，打完问题时一般已经好了）。"""
@@ -383,14 +432,19 @@ class EngineHub(QObject):
             conv.first = (question, message, list(conv.ctx.images))
             answering = True
             failed = await self._turn(conv, message, conv.ctx.images, hand_over=True)
-            if failed is not None:  # 服务出错、别的引擎能用：换它从头接着做
+            steps: list[str] = []
+            for attempt in range(MAX_HANDOVERS):
+                if failed is None:
+                    break
+                # 模型服务出错、还有别的配置能用：换它从头接着做（做到一半的步骤告诉它，别重复做）
                 answering = False
+                steps += failed.get("trace") or []
                 await self._hand_over(conv, failed)
                 message = prompts.first_message(question, conv.ctx, conv.mode,
-                                                notes + _takeover_notes(conv, failed), lessons)
+                                                notes + _takeover_notes(conv, {"trace": steps}), lessons)
                 conv.first = (question, message, list(conv.ctx.images))
                 answering = True
-                await self._turn(conv, message, conv.ctx.images)
+                failed = await self._turn(conv, message, conv.ctx.images, hand_over=attempt + 1 < MAX_HANDOVERS)
         except asyncio.CancelledError:
             if not answering:  # 还在准备（整理快照、打开引擎）时按了 Esc。回答中途停下的结束由 _turn 报
                 self._drop_sessions(conv)  # 问题还没交给引擎：这个对话不再接着问
@@ -403,13 +457,15 @@ class EngineHub(QObject):
         finally:
             conv.busy, conv.job = False, None
 
-    async def _open(self, conv: Conversation) -> None:
+    def _emit_route(self, conv: Conversation, d: Decision) -> None:
+        self._emit(conv.key, Event("route", data={"engine": d.engine, "model": d.model, "effort": d.effort,
+                                                  "via": d.via, "explore": d.explore, "reason": d.reason}))
+
+    async def _open(self, conv: Conversation, decision: Decision | None = None) -> None:
         while True:
-            decision = self.router.decide(conv.task)
+            decision = decision or self.router.decide(conv.task)
             conv.decision = decision
-            self._emit(conv.key, Event("route", data={
-                "engine": decision.engine, "model": decision.model, "effort": decision.effort,
-                "via": decision.via, "explore": decision.explore, "reason": decision.reason}))
+            self._emit_route(conv, decision)
             try:
                 # 有时间上限：打开卡住时（2026-10-09 实测卡死过）换另一个引擎，不能让你一直等
                 conv.session = await asyncio.wait_for(
@@ -424,6 +480,7 @@ class EngineHub(QObject):
             except Exception as e:  # noqa: BLE001
                 log.warning("%s 打不开：%s", decision.engine, str(e) or type(e).__name__)
                 self.router.mark_unavailable(decision.engine)
+                decision = None
                 if not self.router.available():
                     raise
                 self._emit(conv.key, Event("status", tr("{error} 换一个引擎接着做…", error=friendly_error(e))))
@@ -437,9 +494,21 @@ class EngineHub(QObject):
             lessons = await asyncio.get_running_loop().run_in_executor(None, self._recall, conv,
                                                                        snap.situation(question))
             await self._escalate(conv)
+            notes = self._notes(conv)
+            message = prompts.followup_message(question, conv.ctx, conv.mode, notes, lessons)
             answering = True
-            await self._turn(conv, prompts.followup_message(question, conv.ctx, conv.mode, self._notes(conv), lessons),
-                             conv.ctx.images)
+            failed = await self._turn(conv, message, conv.ctx.images, hand_over=True)
+            for attempt in range(MAX_HANDOVERS):
+                if failed is None:
+                    break
+                # 模型服务出错：同一个引擎换模型时对话接着来，原样再问；换了引擎要带上前面的问答
+                answering = False
+                if not await self._hand_over(conv, failed, keep=True):
+                    message = prompts.followup_message(
+                        question, conv.ctx, conv.mode, notes + _recap_notes(conv) + _takeover_notes(conv, failed),
+                        lessons)
+                answering = True
+                failed = await self._turn(conv, message, conv.ctx.images, hand_over=attempt + 1 < MAX_HANDOVERS)
         except asyncio.CancelledError:
             if not answering:  # 还在准备时按了 Esc：会话没动过，还能接着问
                 self._emit(conv.key, Event("done", data=dict(STOPPED)))
@@ -472,8 +541,8 @@ class EngineHub(QObject):
                 "但它可能因为确定不了当前网址而停下。办不成就在汇报第一行写「没完成：浏览器操作还没接通」。"]
 
     async def _turn(self, conv: Conversation, text: str, images: list, hand_over: bool = False) -> dict | None:
-        """一轮问答。hand_over=True（首问）时，碰上服务出错（限流、过载、断网……）而别的引擎能用：不报结束，
-        返回这一轮的结束信息（带做过的步骤），由调用方换引擎接着做；其它时候返回 None。"""
+        """一轮问答。hand_over=True 时，碰上模型服务出错（这个模型用不了、限流、过载、断网……）而还有别的配置能用：
+        不报结束，返回这一轮的结束信息（带做过的步骤），由调用方换一个接着做；其它时候返回 None。"""
         conv.busy, conv.sending, conv.delegated = True, True, False
         if conv.learn_timer is not None:
             conv.learn_timer.cancel()  # 还在接着问：等这次对话结束了再总结
@@ -510,7 +579,7 @@ class EngineHub(QObject):
                     else:
                         self._check_outcome(conv, ev.data, answer)
                     self._watch_outcome(conv, ev.data)
-                    if self._avoid_after(conv, ev.data) and hand_over:
+                    if self._sideline(conv, ev.data) and hand_over:
                         handing = True
                         break
                     conv.turns.append(ev.data)
@@ -539,7 +608,7 @@ class EngineHub(QObject):
             raise
         except Exception as e:  # noqa: BLE001
             done = _crash(e) | ({"stopped": True} if conv.stopped else {})
-            if self._avoid_after(conv, done) and hand_over:
+            if self._sideline(conv, done) and hand_over:
                 log.warning("引擎出错，换一个接着做：%s", done["exception"])
                 handing = True
                 return dict(done, trace=list(trace))
@@ -558,32 +627,51 @@ class EngineHub(QObject):
                 self._schedule_evolve(conv)
         return None
 
-    def _avoid_after(self, conv: Conversation, done: dict) -> bool:
-        """这一轮没办成是因为模型服务（限流、过载、断网、认证、接口故障）：别的引擎能用时，这个引擎先歇
-        UNAVAILABLE_S 秒，接下来的提问交给别的引擎（实测：Codex 一直 429，路由还是每次都交给它，次次秒失败）。
-        返回歇没歇。只有它一个能用时不歇：歇了就谁都用不了。"""
-        if conv.decision is None or conv.stopped or done.get("ok") or not _service_error(done):
+    def _sideline(self, conv: Conversation, done: dict) -> bool:
+        """这一轮没办成是因为模型服务（这个模型用不了、认证失败、限流、过载、断网……）：出问题的模型或整个引擎
+        先放一边（见 router.sideline），接下来的提问不再选它（实测：Codex 一直 429，路由还是每次都交给它，次次秒失败；
+        2026-10-14：中转的 deepseek-flash 一直 502，连着四问都没换模型）。返回 True = 还有别的配置能接着做。"""
+        kind = "" if conv.decision is None or conv.stopped else failure_kind(done)
+        if not kind:
             return False
-        engine = conv.decision.engine
-        if not [e for e in self.router.available() if e != engine]:
-            return False
-        self.router.mark_unavailable(engine)
-        log.info("%s 的服务出错（%s），先换别的引擎", engine, str(done.get("error") or done.get("exception"))[:200])
+        d = conv.decision
+        if not self.router.sideline(d.engine, d.model, kind):
+            return False  # 只剩它了：歇了就谁都用不了
+        log.info("%s · %s 的服务出错（%s），先换别的", d.engine, d.model,
+                 str(done.get("error") or done.get("exception"))[:200])
         return True
 
-    async def _hand_over(self, conv: Conversation, failed: dict) -> None:
-        """首问碰上服务出错：换另一个引擎从头接着做（设计 7.6 节）。出错的引擎已经由 _avoid_after 歇下了，
-        界面上只多一行状态；写了一半的回答撤掉。"""
-        old, conv.session = conv.session, None
-        if old is not None:
-            self.loop.create_task(old.close())
-        before = conv.decision.engine if conv.decision else ""
+    async def _hand_over(self, conv: Conversation, failed: dict, keep: bool = False) -> bool:
+        """服务出错（设计 7.6 节）：换一个能用的配置接着做。出问题的模型或引擎已经由 _sideline 放到一边了，
+        界面上只多一行状态；写了一半的回答撤掉。keep=True（追问）时换到的还是同一个引擎，就在原来的会话里换模型，
+        对话历史还在。返回 True = 是这样换的（原样再问就行）；False = 开了新会话（追问要带上前面的问答）。"""
+        before = conv.decision
         self._emit(conv.key, Event("retract"))
-        await self._open(conv)
+        decision = self.router.decide(conv.task)
+        kept = False
+        if keep and conv.session is not None and before is not None and decision.engine == before.engine:
+            try:
+                conv.session = await self.engines[decision.engine].switch(conv.session, conv.mode, decision.model,
+                                                                          decision.effort)
+                conv.decision, kept = decision, True
+                self._emit_route(conv, decision)
+            except Exception as e:  # noqa: BLE001 - 换不了就新开一个
+                log.warning("在原来的会话里换模型失败，新开一个：%s", e)
+        if not kept:
+            old, conv.session = conv.session, None
+            if old is not None:
+                self.loop.create_task(old.close())
+            await self._open(conv, decision)
+        after = conv.decision
         reason = service_reason(f"{failed.get('error') or ''} {failed.get('exception') or ''}")
-        self._emit(conv.key, Event("status", tr("{engine} {reason}，换 {other} 接着做…",
-                                                engine=ENGINE_TITLE.get(before, before), reason=reason,
-                                                other=ENGINE_TITLE.get(conv.decision.engine, conv.decision.engine))))
+        if before is not None and after.engine == before.engine:
+            text = tr("{model} {reason}，换 {other} 接着做…", model=before.model, reason=reason, other=after.model)
+        else:
+            engine = before.engine if before is not None else ""
+            text = tr("{engine} {reason}，换 {other} 接着做…", engine=ENGINE_TITLE.get(engine, engine), reason=reason,
+                      other=ENGINE_TITLE.get(after.engine, after.engine))
+        self._emit(conv.key, Event("status", text))
+        return kept
 
     async def _stop(self, conv: Conversation) -> None:
         """按了 Esc。引擎正在回答：先请它自己停下（会话还能接着问），过了 STOP_GRACE 秒还在跑就直接结束这一轮；
@@ -725,20 +813,23 @@ class EngineHub(QObject):
             log.warning("总结经验失败：%s", friendly_error(e))
 
     async def _complete(self, prompt: str, schema: dict | None = learn.SCHEMA) -> str:
-        """后台小活的一次性模型调用：有 Claude 就直接调它的接口（快、不起进程），没有再用 Codex，最后是 DSH。"""
+        """后台小活的一次性模型调用：有 Claude 就直接调它的接口（快、不起进程），没有再用 Codex，最后是 DSH。
+        一个出错就换下一个（2026-10-14 实测：中转的 Codex 一直 502，总结经验次次失败，DSH 明明能用也没轮到）。"""
         ready = self.router.available()
-        claude = self.router.best_model("claude") if "claude" in ready else ""
-        if claude and claude_env():
+        failure: Exception | None = None
+        for engine in ("claude", "codex", "dsh"):
+            model = self.router.best_model(engine) if engine in ready else ""
+            if not model or (engine == "claude" and not claude_env()):
+                continue
             try:
-                return await asyncio.get_running_loop().run_in_executor(None, claude_complete, prompt, claude)
+                if engine == "claude":
+                    return await asyncio.get_running_loop().run_in_executor(None, claude_complete, prompt, model)
+                return await self.engines[engine].complete(prompt, model, schema)
             except Exception as e:  # noqa: BLE001
-                log.warning("用 Claude 总结经验失败：%s", friendly_error(e))
-        codex = self.router.best_model("codex") if "codex" in ready else ""
-        if codex:
-            return await self.engines["codex"].complete(prompt, codex, schema)
-        dsh = self.router.best_model("dsh") if "dsh" in ready else ""
-        if dsh:
-            return await self.engines["dsh"].complete(prompt, dsh, schema)
+                log.warning("后台小活用 %s 失败：%s", ENGINE_TITLE[engine], friendly_error(e))
+                failure = e
+        if failure is not None:
+            raise failure
         raise RuntimeError(tr("没有可用的模型"))
 
     def _learn_from_turn(self, conv: Conversation, done: dict) -> None:
@@ -873,9 +964,7 @@ class EngineHub(QObject):
             return
         conv.decision = stronger
         log.info("上一轮没办成，换成 %s · %s", stronger.model, stronger.effort)
-        self._emit(conv.key, Event("route", data={
-            "engine": stronger.engine, "model": stronger.model, "effort": stronger.effort,
-            "via": stronger.via, "explore": False, "reason": stronger.reason}))
+        self._emit_route(conv, stronger)
         self._emit(conv.key, Event("status", tr("上一轮没办成，这次加强：{model} · {effort}", model=stronger.model,
                                                 effort=stronger.effort)))
 

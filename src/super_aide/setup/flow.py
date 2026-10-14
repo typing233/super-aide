@@ -53,13 +53,15 @@ def can_start(report: Report, chose_dsh: bool, enabled: bool) -> bool:
 # ---------- 刚配好的服务：用它确实提供的模型 ----------
 
 def only_model(engine: EngineSettings, model: str) -> None:
-    """你在自定义服务地址里填了模型：就用它（加进清单并打开），其它的先关掉，设置里还能再打开。"""
-    if not model:
+    """你在自定义服务地址里填了模型：就用它（加进清单并打开），其它的先关掉，设置里还能再打开。
+    DeepSeek Harness 可以填几个（逗号隔开）：都打开。"""
+    chosen = [m.strip() for m in model.split(",") if m.strip()]
+    if not chosen:
         return
     for m in engine.models:
-        m.enabled = m.id == model
-    if not any(m.id == model for m in engine.models):
-        engine.models.insert(0, ModelEntry(model, True, "max"))
+        m.enabled = m.id in chosen
+    known = {m.id for m in engine.models}
+    engine.models[:0] = [ModelEntry(m, True, "max") for m in chosen if m not in known]
 
 
 def strongest(engine: str, ids: list[str]) -> str:

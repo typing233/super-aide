@@ -42,6 +42,7 @@ def fake_hub(router=None, engines=None, **extra) -> SimpleNamespace:
     events = []
     hub = SimpleNamespace(router=router or FakeRouter(), engines=engines or {}, conversations={}, _last={},
                           events=events, _emit=lambda key, ev: events.append(ev), **extra)
+    hub._emit_route = lambda c, d: EngineHub._emit_route(hub, c, d)
     return hub
 
 

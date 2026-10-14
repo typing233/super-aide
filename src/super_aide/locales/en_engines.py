@@ -45,6 +45,8 @@ EN = {
     "上一轮没办成，这次加强：{model} · {effort}": "Last try didn't work, stepping up to {model} · {effort}",
     "{error} 换一个引擎接着做…": "Switching to another engine… ({error})",
     "{engine} {reason}，换 {other} 接着做…": "{engine} {reason}; switching to {other}…",
+    "{model} {reason}，换 {other} 接着做…": "{model} {reason}; switching to {other}…",
+    "用不了": "isn't available",
     "被限流了": "is rate-limited",
     "认证失败": "couldn't sign in",
     "服务暂时不可用": "is temporarily unavailable",

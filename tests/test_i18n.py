@@ -14,6 +14,7 @@ import pytest
 from super_aide import i18n
 from super_aide.engines import browser_use, computer, experience
 from super_aide.engines.base import reported_failure
+from super_aide.router import policy
 from super_aide.setup import install
 from super_aide.snapshot import content
 
@@ -54,6 +55,7 @@ def test_dynamic_keys_have_english():
     keys += [text for pair in content.PLACEHOLDERS.values() for text in pair]
     keys += list(computer.ACT_VERBS.values()) + ["正在操作界面", experience.STATUS]
     keys += [browser_use.FIX, browser_use.NOT_CONNECTED, browser_use.NO_EXTENSION]
+    keys += list(policy.LABELS.values()) + ["这类任务"]  # 路由表现里列出的任务类型
     assert [k for k in keys if k not in catalog] == []
 
 

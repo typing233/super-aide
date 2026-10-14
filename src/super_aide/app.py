@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from . import __version__, autostart, config, history, hotkeys, i18n, paths, relocate, update
 from .launch import SINGLETON, WAKE_EVENT
 from .engines import prompts
+from .engines.dsh import route as dsh_route
 from .engines.hub import EngineHub
 from .evolve.manager import EvolveManager, wait_for_apply, write_health
 from .i18n import app_name, tr
@@ -513,6 +514,10 @@ class SuperAide:
             added += engine.merge_discovered(ids)
             if name in self.fresh:
                 fitted |= flow.fit_models(engine, name, ids, self.fresh.pop(name))
+            elif name == "dsh" and dsh_route().custom:
+                # 用的是自定义的服务：DSH 报的就是它提供的全部模型（原来的 DeepSeek 模型在那里用不了）。
+                # DeepSeek 账号、API Key 时不这样：会话建好之前只知道两个默认的，会把你打开的别的模型关掉
+                fitted |= flow.fit_models(engine, name, ids)
         if added or fitted:
             config.save(self.cfg)
             log.info("发现 %d 个新模型，已加入配置（默认关闭）", added)

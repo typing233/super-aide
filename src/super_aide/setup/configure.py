@@ -5,7 +5,9 @@ Super Aide 自己不存密钥，都写进工具自己的配置里，和你手动
 - Codex：~/.codex/config.toml 里加一个服务商（model_providers.super_aide），密钥写在服务商的 experimental_bearer_token 里；
   官方 API Key 用 `codex login --with-api-key` 存。原来放在用户环境变量里（服务商的 env_key），可已经开着的 Codex 桌面版、
   VS Code 插件、终端拿不到新变量，一用就报 "Missing environment variable"（2026-10-10 实测），现在不用环境变量了。
-- DeepSeek Harness：账号在它自己的界面里登录（没有命令行登录）；API Key 放在用户环境变量 DEEPSEEK_API_KEY。
+- DeepSeek Harness：账号在它自己的界面里登录（没有命令行登录）；DeepSeek 官方的 API Key 放在用户环境变量 DEEPSEEK_API_KEY；
+  自定义服务地址写进 DSH 自己的模型设置（setup/dshconf.py：路由 super-aide，DSH 桌面版里看得到），密钥写进 ~/.dsh/.env。
+  DSH 能走 Responses、Chat Completions、Anthropic Messages 三种接口：测试连接时按这个顺序试，哪种通就记哪种。
 改文件之前各留一份备份（*.super-aide.bak），只改这几项，别的设置和注释原样保留。
 """
 
@@ -24,8 +26,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..i18n import tr
-from . import winenv
-from .detect import NAMES, Places, Report, claude_dir, codex_dir, dsh_desktop
+from . import dshconf, winenv
+from .detect import NAMES, Places, Report, claude_dir, codex_dir, dsh_desktop, dsh_dir
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +56,9 @@ class Check:
     message: str
     models: list[str] = field(default_factory=list)
     verified: bool = False  # 真的验证了密钥（列出了模型）；False = 连上了，但这个服务没法确认密钥
+    api: str = ""           # 走通的接口（给 DSH 的自定义服务用）：openai-responses | openai-completions | anthropic-messages
+    fatal: bool = False     # 密钥不对、连不上：换哪种接口都一样
+    missing: bool = False   # 这个地址上没有这种接口（404、405）：换一种接口试
 
 
 # ---------- 账号登录 ----------
@@ -223,14 +228,14 @@ def _probe(url: str, headers: dict[str, str], body: dict, model: str, timeout: f
         return Check(False, tr("用 {model} 试了一下，服务报错：{reason}", model=model,
                                reason=f"{reason}（{kind}）" if kind else reason))
     if code in (401, 403):
-        return Check(False, tr("密钥不对（服务地址返回 {code}）", code=code))
+        return Check(False, tr("密钥不对（服务地址返回 {code}）", code=code), fatal=True)
     if code in (404, 405):
-        return Check(False, tr("这个地址上没有对应的接口（返回 {code}），请检查地址", code=code))
+        return Check(False, missing=True, message=tr("这个地址上没有对应的接口（返回 {code}），请检查地址", code=code))
     if code == -1:
         return Check(False, tr("用 {model} 试了 {seconds} 秒没有回应：这个服务可能没有这个模型，或者地址不对",
                                model=model, seconds=int(timeout)))
     if code == 0:
-        return Check(False, tr("连不上这个地址（{reason}）", reason=text))
+        return Check(False, tr("连不上这个地址（{reason}）", reason=text), fatal=True)
     detail = " ".join(text.split())[:160]
     if code in (400, 422) and "model" in text.lower():
         return Check(False, tr("这个服务好像没有模型 {model}（返回 {code}：{detail}）", model=model, code=code, detail=detail))
@@ -251,6 +256,38 @@ def probe_claude(base: str, key: str, model: str, timeout: float = PROBE_TIMEOUT
                   {"model": model, "max_tokens": 16, "messages": [{"role": "user", "content": "ping"}]}, model, timeout)
 
 
+def probe_chat(base: str, key: str, model: str, timeout: float = PROBE_TIMEOUT) -> Check:
+    """Chat Completions 接口（不流式：流里的每一块没有 type，看不出成败）。"""
+    root = openai_base(base) or OPENAI_OFFICIAL
+    return _probe(f"{root}/chat/completions", {"Authorization": f"Bearer {key}"},
+                  {"model": model, "max_tokens": 16, "messages": [{"role": "user", "content": "ping"}]}, model, timeout)
+
+
+def models_of(text: str) -> list[str]:
+    """模型那一栏：可以填几个，用逗号（中英文都行）或空格隔开。"""
+    return list(dict.fromkeys(m for m in re.split(r"[,，;；\s]+", text or "") if m))
+
+
+def check_route(base: str, key: str, model: str, timeout: float = PROBE_TIMEOUT) -> Check:
+    """给 DSH 用的自定义服务：用第一个模型按 Responses → Chat Completions → Anthropic Messages 的顺序试，
+    哪种接口通就记下哪种。密钥不对的话哪种都一样，不再往下试。"""
+    first = models_of(model)[:1]
+    if not first:
+        return Check(False, tr("请在“模型”里填这个服务提供的模型（可以填几个，用逗号隔开）"))
+    failed: Check | None = None
+    for api, probe in (("openai-responses", probe_openai), ("openai-completions", probe_chat),
+                       ("anthropic-messages", probe_claude)):
+        result = probe(base, key, first[0], timeout)
+        if result.ok:
+            result.api = api
+            return result
+        if result.fatal:
+            return result
+        if failed is None or (failed.missing and not result.missing):
+            failed = result  # 说的最有用的那个：有这种接口、但模型不对，比"没有这种接口"更说明问题
+    return failed
+
+
 def check(tool: str, base: str, key: str, model: str = "") -> Check:
     """测试连接：先列模型；列不出来（不少中转服务不支持）或者你填的模型不在里面，就用你填的模型真发一个很小的请求。
     Codex 列不出模型时一定要填模型：Codex 原来的默认模型多半是上一个服务商的，换过来就用不了。"""
@@ -258,6 +295,8 @@ def check(tool: str, base: str, key: str, model: str = "") -> Check:
     if not key:
         return Check(False, tr("请填写密钥"))
     if tool == "dsh":
+        if base.strip():
+            return check_route(base, key, model)
         return check_openai(DEEPSEEK_OFFICIAL, key)  # DeepSeek 官方 API 的模型列表
     listed = check_claude(base, key) if tool == "claude" else check_openai(base, key)
     if listed.verified and (not model or model in listed.models):
@@ -277,9 +316,10 @@ def check(tool: str, base: str, key: str, model: str = "") -> Check:
 # ---------- 自定义服务地址：写配置 ----------
 
 def save(tool: str, base: str, key: str, model: str = "", places: Places | None = None,
-         offered: list[str] | None = None) -> tuple[str, str]:
-    """写进工具自己的配置。offered：服务列出来的模型（列不出来就是空）。
-    返回 (实际用的默认模型, 换掉的原默认模型)：你没填、原来的默认模型这个服务又不提供时，会换成它提供的最强的那个。"""
+         offered: list[str] | None = None, api: str = "") -> tuple[str, str]:
+    """写进工具自己的配置。offered：服务列出来的模型（列不出来就是空）；api：DSH 的自定义服务走通的接口。
+    返回 (实际用的默认模型, 换掉的原默认模型)：你没填、原来的默认模型这个服务又不提供时，会换成它提供的最强的那个。
+    DSH 填了几个模型时，"实际用的"是逗号隔开的这几个。"""
     p = places or Places.current()
     key, model = key.strip(), model.strip()
     if not key:
@@ -288,9 +328,28 @@ def save(tool: str, base: str, key: str, model: str = "", places: Places | None 
         save_claude(claude_dir(p) / "settings.json", base, key, model)
         return model, ""
     if tool == "dsh":
-        winenv.set_user_env("DEEPSEEK_API_KEY", key)  # DSH 的 deepseek-official 服务商从这里取
-        return "", ""
+        return save_dsh(dsh_dir(p), base, key, model, api)
     return save_codex(codex_dir(p) / "config.toml", base, key, model, offered or [])
+
+
+def save_dsh(home: Path, base: str, key: str, model: str = "", api: str = "") -> tuple[str, str]:
+    """没填服务地址：DeepSeek 官方 API Key（DSH 的 deepseek-official 从 DEEPSEEK_API_KEY 取），默认模型原来是我们写的
+    自定义服务的话改回官方的。填了：写进 DSH 的模型设置（路由 super-aide + 默认模型），密钥写进 ~/.dsh/.env。"""
+    try:
+        if not base.strip():
+            winenv.set_user_env("DEEPSEEK_API_KEY", key)
+            from ..engines.dsh import MODELS
+
+            dshconf.use_builtin(home, "deepseek-official", MODELS[0]["id"])
+            return "", ""
+        models = models_of(model)
+        root = claude_base(base) if api == "anthropic-messages" else openai_base(base)
+        dshconf.save_route(home, root, dshconf.KEY_ENV, api or "openai-responses", models)
+        dshconf.set_env(home / ".env", dshconf.KEY_ENV, key)
+    except (dshconf.DshConfigError, OSError) as e:
+        raise ConfigError(tr("没法自动修改 {path}（{error}），请在 DeepSeek Harness 的模型设置里手动添加",
+                             path=dshconf.patch_path(home), error=e)) from e
+    return ",".join(models), ""
 
 
 def save_claude(path: Path, base: str, key: str, model: str = "") -> None:

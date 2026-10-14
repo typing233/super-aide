@@ -71,6 +71,14 @@ function dayLabel(iso) {
     : I18N.t('{year} 年 {month} 月 {day} 日', date);
 }
 
+// 由谁、用哪个模型、多大的思考强度答的：Claude · claude-opus-5-5 · 思考强度 high
+function configLabel(turn) {
+  if (!turn.engine) return '';
+  const parts = [ENGINE_NAME[turn.engine] || turn.engine, turn.model];
+  if (turn.effort) parts.push(I18N.t('思考强度 {effort}', { effort: turn.effort }));
+  return parts.filter(Boolean).join(' · ');
+}
+
 function timeLabel(iso) {
   const d = new Date(iso);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -246,12 +254,19 @@ async function select(id) {
   const meta = el('div', 'meta');
   meta.append(el('span', 'mode-chip', I18N.t(MODE_LABEL[conv.mode] || '问答')),
     el('span', '', `${dayLabel(conv.started)} ${timeLabel(conv.started)}`));
-  if (first.engine) meta.append(el('span', '', `${ENGINE_NAME[first.engine] || first.engine} · ${first.model}`));
+  let shown = configLabel(first);
+  if (shown) meta.append(el('span', '', shown));
   detail.append(meta);
 
   for (const turn of conv.turns) {
     const box = el('section', 'turn');
     box.append(el('div', 'turn-q', turn.question));
+    // 这一轮换了配置（上一轮没办成时加强、模型服务出错时换了一个）：写在这一问下面
+    const label = configLabel(turn);
+    if (label && label !== shown) {
+      box.append(el('div', 'turn-meta', label));
+      shown = label;
+    }
     if (!turn.ok && turn.error) box.append(el('div', 'error', turn.error));
     const answer = el('div', 'answer-body md');
     renderMarkdown(answer, turn.answer);
@@ -336,15 +351,15 @@ window.historyView = { reload };
 const now = Date.now();
 const PREVIEW = [
   { id: 'a', started: new Date(now - 3600e3).toISOString(), mode: 'ask', turns: [
-    { question: '这个报错是什么原因？', ok: true, engine: 'claude', model: 'claude-opus-5-5',
+    { question: '这个报错是什么原因？', ok: true, engine: 'claude', model: 'claude-opus-5-5', effort: 'medium',
       answer: '当前内核用的 Python 环境里没有装 `pandas`。\n\n1. 在 notebook 里运行：\n\n   ```\n   %pip install pandas\n   ```\n\n2. 重启内核，再运行这个单元格。' },
-    { question: '装了还是不行', ok: true, engine: 'claude', model: 'claude-opus-5-5',
+    { question: '装了还是不行', ok: true, engine: 'claude', model: 'claude-opus-5-5', effort: 'high',
       answer: '多半是装到了别的 Python。先运行 `import sys; print(sys.executable)` 看内核用的是哪个。' }] },
   { id: 'b', started: new Date(now - 7200e3).toISOString(), mode: 'act', turns: [
     { question: '帮我修好它', ok: false, error: '浏览器操作还没接通：在 Codex 应用的插件页里安装「Chrome」插件。',
-      engine: 'codex', model: 'gpt-6-astra', answer: '没完成：浏览器操作还没接通。\n本次没有改动任何东西。' }] },
+      engine: 'codex', model: 'gpt-6-astra', effort: 'xhigh', answer: '没完成：浏览器操作还没接通。\n本次没有改动任何东西。' }] },
   { id: 'c', started: new Date(now - 90000e3).toISOString(), mode: 'act', turns: [
-    { question: '帮我把这个软件卸载干净', ok: true, engine: 'codex', model: 'gpt-6-astra',
+    { question: '帮我把这个软件卸载干净', ok: true, engine: 'codex', model: 'gpt-6-astra', effort: 'high',
       answer: '已完成：卸载了 Foo，清理了 3 处残留。\n想恢复的话需要重新安装。' }] },
 ];
 

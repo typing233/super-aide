@@ -37,6 +37,8 @@ class Bridge(QObject):
     view_changed = Signal(str)
     shown_on_screen = Signal()
     dock_expanded = Signal()
+    mini_expanded = Signal()  # 点了收起的那一条：展开回卡片
+    drag_started = Signal()   # 按住卡片没有字的地方：拖动窗口
     pill_area = Signal(int, int, int, int)  # 胶囊（展开时是小窗）连同阴影在窗口里占的那一块
 
     @Slot()
@@ -83,6 +85,14 @@ class Bridge(QObject):
     def expandDock(self) -> None:  # noqa: N802
         self.dock_expanded.emit()
 
+    @Slot()
+    def expandMini(self) -> None:  # noqa: N802
+        self.mini_expanded.emit()
+
+    @Slot()
+    def startDrag(self) -> None:  # noqa: N802
+        self.drag_started.emit()
+
     @Slot(int, int, int, int)
     def pillArea(self, x: int, y: int, w: int, h: int) -> None:  # noqa: N802
         self.pill_area.emit(x, y, w, h)
@@ -99,6 +109,7 @@ class Bridge(QObject):
 
 class Panel(QWidget):
     deactivated = Signal()
+    moved = Signal()  # 窗口挪了位置（你拖卡片时，新手指引的气泡跟着）
 
     def __init__(self, bridge: Bridge) -> None:
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -137,6 +148,10 @@ class Panel(QWidget):
         if event.type() == QEvent.ActivationChange and not self.isActiveWindow():
             self.deactivated.emit()
         super().changeEvent(event)
+
+    def moveEvent(self, event) -> None:  # noqa: N802
+        self.moved.emit()
+        super().moveEvent(event)
 
 
 def exclude_from_capture(widget: QWidget) -> None:

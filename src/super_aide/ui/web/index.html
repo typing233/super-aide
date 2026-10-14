@@ -91,6 +91,16 @@
       <article class="dock-steps md" id="dock-steps"></article>
     </section>
 
+    <!-- ⑥ 收起的回答：点了别处、或者好一阵没动它，缩成右下角的一小条；点一下展开接着问，× 才是关掉 -->
+    <section id="mini-view" class="surface mini" hidden title="展开，接着问" data-i18n-title="展开，接着问">
+      <span class="orb" aria-hidden="true"></span>
+      <span class="mini-state" id="mini-state"></span>
+      <span class="mini-text" id="mini-text"></span>
+      <button class="icon-btn" id="mini-close" title="关闭" data-i18n-title="关闭">
+        <svg viewBox="0 0 20 20"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>
+      </button>
+    </section>
+
   </main>
 
   <!-- 仅在普通浏览器里预览时出现 -->
@@ -102,6 +112,7 @@
     <button data-demo="toast" data-i18n>结果提示</button>
     <button data-demo="stopped" data-i18n>停下后问原因</button>
     <button data-demo="dock" data-i18n>贴边步骤</button>
+    <button data-demo="mini" data-i18n>收起的回答</button>
     <button data-demo="theme" data-i18n>切换深浅</button>
   </nav>
 

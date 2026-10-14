@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ..i18n import tr
+from . import dshconf
 
 TOOLS = ("claude", "codex", "dsh")
 NAMES = {"claude": "Claude Code", "codex": "Codex", "dsh": "DeepSeek Harness"}
@@ -286,12 +287,22 @@ def _dsh(p: Places) -> Tool:
 
 
 def dsh_auth(p: Places) -> tuple[bool, str, str]:
-    """DSH 的凭据：DeepSeek 账号登录记在 ~/.dsh/.credentials.yaml 的 records 下；API Key 可以在环境变量、
-    同一个文件的 refs 下，或者 ~/.dsh/.env 里。只看名字在不在，不读值。"""
+    """DSH 的凭据。DSH 自己的模型设置里默认用的是自定义的服务（dshconf.py）：它的密钥名字（apiKeyEnv）
+    在环境变量、~/.dsh/.credentials.yaml 的 refs 或 ~/.dsh/.env 里就算配好了。否则看 DeepSeek 账号登录
+    （记在同一个文件的 records 下）和 DEEPSEEK_API_KEY。只看名字在不在，不读值。"""
     credentials = dsh_dir(p) / ".credentials.yaml"
+
+    def has_key(name: str) -> bool:
+        return bool(p.env.get(name)) or name in _yaml_keys(credentials, "refs")             or name in _env_file_keys(dsh_dir(p) / ".env")
+
+    route = dshconf.read(dsh_dir(p))
+    if route.custom:
+        if route.key_env and not has_key(route.key_env):
+            return False, "", tr("自定义服务地址还没有密钥（{name}）", name=route.key_env)
+        return True, "custom", tr("自定义服务地址 {host}", host=host(route.base)) if route.base             else tr("自定义服务 {name}", name=route.provider)
     if "deepseek-account-platform/default" in _yaml_keys(credentials, "records"):
         return True, "account", tr("DeepSeek 账号登录")
-    if p.env.get("DEEPSEEK_API_KEY") or "DEEPSEEK_API_KEY" in _yaml_keys(credentials, "refs")             or "DEEPSEEK_API_KEY" in _env_file_keys(dsh_dir(p) / ".env"):
+    if has_key("DEEPSEEK_API_KEY"):
         return True, "apikey", "DeepSeek API Key"
     return False, "", tr("还没登录 DeepSeek 账号")
 

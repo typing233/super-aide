@@ -1,6 +1,7 @@
 """什么情况触发自我改进、什么情况不算。
 
-- 故障不算：网络、DNS、SSL、代理、认证、限流、服务过载、接口故障（Claude 的 api_error 结束时报错常常是空的，
+- 故障不算：网络、DNS、SSL、代理、认证、限流、服务过载、接口故障、这个模型用不了（服务没提供、没开通）
+  （Claude 的 api_error 结束时报错常常是空的，
   只看报错文字会把它当成能力失败）。路由的学习信号也用同一套判断。
 - 按 Esc 停下：你选了"做错了 / 太慢或卡住了 / 没懂我的意思"，或者打字说了原因，才算助手的问题；
   不答、选"不是助手的问题"、写"改主意了""不用了"之类，不算。
@@ -11,6 +12,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+
+from ..engines.base import MODEL_UNAVAILABLE
 
 #: 和能力无关的失败（中英文、HTTP 状态码、常见的网络异常名）
 INFRA_TEXT = re.compile(
@@ -43,13 +46,15 @@ def is_infra(done: dict) -> bool:
     if done.get("reason") in INFRA_REASONS:
         return True
     status = done.get("api_error_status")
-    if isinstance(status, int) and status != 400 and status != 404:
+    if isinstance(status, int) and status != 400:  # 404：接口上没有这个模型（配置问题）
         return True
     if any(name in str(done.get("exception", "")) for name in INFRA_EXCEPTIONS):
         return True
     error = str(done.get("error") or "")
     if done.get("reason") == "reported":
         return bool(REPORTED_INFRA.search(error))
+    if MODEL_UNAVAILABLE.search(f"{error} {done.get('exception') or ''}"):
+        return True  # 这个模型用不了（服务没提供、没开通）：换个模型就好，不是能力问题
     return bool(INFRA_TEXT.search(error))
 
 

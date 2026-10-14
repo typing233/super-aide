@@ -1,5 +1,8 @@
 """控制器：召唤 → 定格画面 + 自动选区 + 输入框 → 提问 → 回答卡片 / 操作胶囊 → 消失。
 
+回答卡片按住没有字的地方能拖开；点了别处（或者答完好一阵没动它）不会消失，而是收成右下角的一小条
+（分步骤的回答贴到屏幕边上），点一下展开接着问，点 × 才关掉。
+
 坐标：快照和 Win32 用物理像素，Qt 用逻辑像素。每次召唤只定格你正在用的那块屏幕，
 按它自己的缩放比换算（多显示器、混合缩放见 screens.py）。
 """
@@ -86,6 +89,9 @@ class Controller(QObject):
         self.content = INPUT_SIZE
         self.pill_area = QRect()  # 胶囊（展开时是小窗）在窗口里占的那一块，别处的点击穿过去
         self.anchor = QPoint()
+        self.placed_at = PARK     # 上一次把面板摆在哪（我们自己挪的）：拖动时和它不一样
+        self.dragging = False     # 这张卡片你按住拖过（之后窗口的移动才当成拖动，系统挪一下不算）
+        self.dragged = False      # 这张卡片你拖过：之后长高、找回都停在你放的地方
         self.snap: Snapshot | None = None
         self.kind = "text"
         self.conv_key = ""
@@ -115,9 +121,12 @@ class Controller(QObject):
         b.reasoned.connect(lambda kind, choice, text: self.hub.reason(self.conv_key, kind, choice, text))
         b.shown_on_screen.connect(self._on_shown)
         b.dock_expanded.connect(self._expand_dock)
+        b.mini_expanded.connect(self._expand_mini)
+        b.drag_started.connect(self._start_drag)
         b.pill_area.connect(self._on_pill_area)
         self.overlay.reselected.connect(self._on_reselected)
         self.panel.deactivated.connect(self._on_deactivated)
+        self.panel.moved.connect(self._on_moved)
         self.kind_found.connect(self._on_kind)
         self.hub.event.connect(self._on_engine_event)
         self.esc.triggered.connect(self._on_esc)
@@ -162,7 +171,10 @@ class Controller(QObject):
                     y = above
                 else:  # 选区几乎占满屏幕：放在选区内偏下的位置
                     y = sel.top() + int(sel.height() * 0.8) - h // 2
-                self.anchor = QPoint(x, y)
+                self.anchor, self.dragged, self.dragging = QPoint(x, y), False, False
+            elif self.dragged:  # 拖到了别的屏幕上：上下按那块屏幕收
+                screen = QGuiApplication.screenAt(self.anchor + QPoint(w // 2, MARGIN + 20))
+                avail = screen.availableGeometry() if screen is not None else avail
             x = self.anchor.x()
             y = max(avail.top(), min(self.anchor.y(), avail.bottom() - h))
         elif self.view == "dock":  # 贴在离选区远的那一侧，不挡住你正在照着做的地方
@@ -173,9 +185,10 @@ class Controller(QObject):
         else:  # 胶囊和结果提示：右下角
             x = avail.right() - w + MARGIN - EDGE
             y = avail.bottom() - h + MARGIN - EDGE
-        self.panel.setGeometry(QRect(QPoint(x, y), QSize(w, h)))
-        if self.view == "dock":
-            # 四周给阴影留的透明边也会挡住下面窗口的点击（实测）。贴边时会长时间停在别的窗口上，只保留卡片本身
+        self.placed_at = QPoint(x, y)
+        self.panel.setGeometry(QRect(self.placed_at, QSize(w, h)))
+        if self.view in ("dock", "mini"):
+            # 四周给阴影留的透明边也会挡住下面窗口的点击（实测）。贴边、收起时会长时间停在别的窗口上，只保留卡片本身
             self.panel.setMask(QRegion(MARGIN, MARGIN, w - 2 * MARGIN, h - 2 * MARGIN))
         elif self.view == "pill" and not self.pill_area.isEmpty():
             # 操作中窗口是展开后的大小，只保留胶囊（展开时是小窗）那一块，别处的透明地方让点击穿过去
@@ -226,6 +239,7 @@ class Controller(QObject):
         # （网页重画好之前，旧画面会先闪一下）
         self.panel.call("park")
         self.overlay.move(PARK)
+        self.placed_at = PARK
         self.panel.move(PARK)
         self.placed.emit(QRect())
 
@@ -426,12 +440,15 @@ class Controller(QObject):
         # 点它也不抢走焦点：助手正在操作的窗口不受影响。助手动真实鼠标时，工具服务器会让它暂时穿透（cu/passthrough.py）
         self.pill_area = QRect()
         self.panel.set_click_through(view == "pill")
-        self.panel.set_no_activate(view in ("pill", "dock"))
-        if view == "pill" and self.prev_fg:
+        self.panel.set_no_activate(view in ("pill", "dock", "mini"))
+        # 开始操作前、卡片放着没动收起来时，把焦点还给原来的窗口（点了别处收起的，焦点已经在你点的地方了）
+        if (view == "pill" or view == "mini" and self.panel.isActiveWindow()) and self.prev_fg:
             try:
-                win32gui.SetForegroundWindow(self.prev_fg)  # 开始操作前把焦点还给原来的窗口
+                win32gui.SetForegroundWindow(self.prev_fg)
             except Exception:  # noqa: BLE001 - 原窗口可能已关闭
                 pass
+        if view == "mini":
+            self.happened.emit("mini")
         self._place()
 
     def _on_pill_area(self, x: int, y: int, w: int, h: int) -> None:
@@ -446,13 +463,40 @@ class Controller(QObject):
             self.panel.set_click_through(False)
 
     def _on_deactivated(self) -> None:
-        # 点了别处：回答完的卡片淡出，分步骤的回答缩到屏幕边上；还在回答时不打断（可能只是在对照着看）
-        if self.view != "card" or self.hub.is_busy(self.conv_key):
+        # 点了别处：分步骤的回答缩到屏幕边上（边看边做），别的收成右下角的一小条（还在回答也一样，答好了那一条上会说），
+        # 点一下展开接着问，× 才关掉
+        if self.view != "card":
             return
-        if len(STEP_ITEM.findall(self.last_answer)) >= 2:
+        if not self.hub.is_busy(self.conv_key) and len(STEP_ITEM.findall(self.last_answer)) >= 2:
             self.dock()
         else:
-            self.dismiss()
+            self.minimize()
+
+    def minimize(self) -> None:
+        self.panel.set_no_activate(True)
+        self.panel.call("minimize")  # 网页切到收起的样子后会通知 setView('mini')，在那里摆位置
+
+    def _expand_mini(self) -> None:
+        if self.view != "mini":
+            return
+        self.panel.set_no_activate(False)
+        self.view = None
+        self.restore()
+
+    def _start_drag(self) -> None:
+        handle = self.panel.windowHandle()
+        if self.view == "card" and handle is not None:
+            self.dragging = True
+            handle.startSystemMove()
+
+    def _on_moved(self) -> None:
+        """你在拖卡片：记下放在哪（之后长高、收起再展开、关了再找回都停在这儿），新手指引的气泡跟着。
+        我们自己摆的位置先记进 placed_at 再挪，不会被当成拖动。"""
+        if self.view != "card" or not self.dragging or self.panel.pos() == self.placed_at:
+            return
+        self.anchor = self.placed_at = self.panel.pos()
+        self.dragged = True
+        self.placed.emit(self._shown_rect(self.panel.geometry()))
 
     def dock(self) -> None:
         self.panel.set_no_activate(True)
@@ -467,9 +511,12 @@ class Controller(QObject):
         self.restore()
 
     def restore(self) -> None:
-        """单击托盘图标：找回最近一次的回答（贴边的步骤展开回卡片）。"""
+        """单击托盘图标：找回最近一次的回答（贴边的步骤、收起的那一条展开回卡片）。"""
         if self.view == "dock":
             self._expand_dock()
+            return
+        if self.view == "mini":
+            self._expand_mini()
             return
         if not self.conv_key or self.view is not None:
             return
@@ -483,7 +530,7 @@ class Controller(QObject):
 
     def dismiss(self) -> None:
         self.signals.clear_guide()  # 收起回答，屏幕上的指引框也收起（贴边的步骤不走这里，指引会留着）
-        if self.view in ("card", "input") and self.hub.is_busy(self.conv_key) and self.conv_mode == "ask":
+        if self.view in ("card", "input", "mini") and self.hub.is_busy(self.conv_key) and self.conv_mode == "ask":
             self.hub.interrupt(self.conv_key)
         self._park()
         self._return_focus()

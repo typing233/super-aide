@@ -4,12 +4,15 @@
 - 进程：一个常驻进程管多个会话（起一次约 5 秒）。问答一个（只读沙箱、不审批），操作一个（完全访问、不审批）：
   DSH 的权限在会话建立时就定死了，不能一轮一换。后台对比、后台小活也走问答那个。
 - 预热：建一个会话要十几秒（实测，主要是挂工具服务器），所以提前建好一个，用掉一个就在后台再建一个。
-- 配置：用一份 --patch 覆盖（~/.super_aide/dsh/*.yml，每次启动重写）：账号或 API Key、权限、我们的共享指令和技能；
+- 配置：用一份 --patch 覆盖（~/.super_aide/dsh/*.yml，每次启动重写）：用哪个服务、权限、我们的共享指令和技能；
   关掉 DSH 默认的"上传会话日志"和插件清单上报（会话里有你屏幕上的内容）。不改 ~/.dsh 里你自己的设置。
+- 用哪个服务：照 DSH 自己的模型设置（setup/dshconf.py）。默认用的是自定义的服务（中转、自己部署的）时，
+  把它的路由定义一起带上；否则登录了 DeepSeek 账号用账号，没有就用 API Key。
 - 模型、思考强度：每轮用 session/set_config_option 设（和当前一样就不发）。DSH 的思考强度只有 low / high / max。
 - 工具：每个会话挂上和另外两个引擎一样的 MCP 工具服务器（自研的看界面、动界面，想起经验）。
 - 文字：DSH 一步做完才把这一步的文字整段发过来（不是逐字）；工具调用之前的那段是过程说明，撤掉。
-- 账号：DeepSeek 账号（在 DSH 里登录，凭据在 ~/.dsh，和 DSH 共用），或者环境变量 DEEPSEEK_API_KEY。
+- 账号：DeepSeek 账号（在 DSH 里登录，凭据在 ~/.dsh，和 DSH 共用）、环境变量 DEEPSEEK_API_KEY，
+  或者自定义服务的密钥（DSH 按 apiKeyEnv 的名字从 ~/.dsh 里取）。
 """
 
 from __future__ import annotations
@@ -25,8 +28,9 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
 from .. import __version__, paths
+from ..config import EFFORTS as LEVELS
 from ..i18n import tr
-from ..setup import detect
+from ..setup import detect, dshconf
 from . import computer, experience
 from .base import Event, short
 
@@ -65,10 +69,19 @@ def launch_command(where: str) -> tuple[list[str], dict[str, str]]:
     return [str(shim)], {}
 
 
+def route(places: detect.Places | None = None) -> dshconf.Route:
+    """用哪个服务：DSH 自己的模型设置里默认用的是自定义的服务就用它；否则登录了 DeepSeek 账号就用账号，
+    没有再用 API Key（DEEPSEEK_API_KEY）。"""
+    places = places or detect.Places.current()
+    found = dshconf.read(detect.dsh_dir(places))
+    if found.custom:
+        return found
+    _ok, auth, _detail = detect.dsh_auth(places)
+    return dshconf.Route(provider="deepseek-official" if auth == "apikey" else "deepseek-account")
+
+
 def provider(places: detect.Places | None = None) -> str:
-    """登录了 DeepSeek 账号就用账号，否则用 API Key（DEEPSEEK_API_KEY）。"""
-    _ok, auth, _detail = detect.dsh_auth(places or detect.Places.current())
-    return "deepseek-official" if auth == "apikey" else "deepseek-account"
+    return route(places).provider
 
 
 def _q(value) -> str:
@@ -76,14 +89,16 @@ def _q(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def patch_text(mode: str, provider_id: str, instructions: str, skills: Path | None = None) -> str:
-    """给 dsh 的 --patch：问答只读、操作完全访问，都不审批；带上我们的指令和技能，关掉上传。"""
+def patch_text(mode: str, provider_id: str | dshconf.Route, instructions: str, skills: Path | None = None) -> str:
+    """给 dsh 的 --patch：问答只读、操作完全访问，都不审批；带上我们的指令和技能，关掉上传。
+    用的是自定义的服务时，带上它在 DSH 模型设置里的路由定义（acp 这套配置里没有）。"""
+    chosen = provider_id if isinstance(provider_id, dshconf.Route) else dshconf.Route(provider=provider_id)
     sandbox = "danger-full-access" if mode == "act" else "read-only"
     # {{名字}} 是 DSH 提示词模板的变量，认不出的会让每次请求都失败：指令里的花括号拆开
     text = instructions.replace("{{", "{ {").replace("}}", "} }")
     lines = [
         "# Super Aide 生成，每次启动重写。" + ("操作：完全访问、不审批。" if mode == "act" else "问答：只读、不审批。"),
-        "- id: acp", "  config:", f"    provider: {_q(provider_id)}", f"    model: {_q(MODELS[0]['id'])}",
+        "- id: acp", "  config:", f"    provider: {_q(chosen.provider)}", f"    model: {_q(chosen.model or MODELS[0]['id'])}",
         "- id: sandbox-policy", "  config:", f"    mode: {_q(sandbox)}", f"    workspaceRoot: {_q(str(paths.SESSIONS))}",
         "- id: approval", "  config:", '    policy: "never"',
         "- id: permission", "  config:", "    presets:",
@@ -99,6 +114,8 @@ def patch_text(mode: str, provider_id: str, instructions: str, skills: Path | No
     ]
     if skills is not None and skills.exists():
         lines += ["- id: skill-filesystem", "  config:", f"    customSkillDirs: {_q([str(skills)])}"]
+    if chosen.custom and chosen.block:
+        lines += chosen.block.rstrip("\n").splitlines()
     return "\n".join(lines) + "\n"
 
 
@@ -335,14 +352,14 @@ class DshEngine:
         note = ""
         if mode == "act":
             note = computer.ACT_NOTE + (ELECTRON_NOTE if env.get("ELECTRON_RUN_AS_NODE") else "")
-        provider_id = provider()
+        chosen = route()
         patch = paths.DSH / f"{mode}.yml"
         patch.parent.mkdir(parents=True, exist_ok=True)
-        patch.write_text(patch_text(mode, provider_id, self.instructions + note, paths.PLUGIN / "skills"),
+        patch.write_text(patch_text(mode, chosen, self.instructions + note, paths.PLUGIN / "skills"),
                          encoding="utf-8")
-        proc = AcpProcess(mode, command, env, patch, provider_id)
+        proc = AcpProcess(mode, command, env, patch, chosen.provider)
         await proc.start()
-        log.info("DeepSeek Harness 已启动（%s，%s）", "操作" if mode == "act" else "问答", provider_id)
+        log.info("DeepSeek Harness 已启动（%s，%s）", "操作" if mode == "act" else "问答", chosen.provider)
         return proc
 
     async def warm(self, mode: str = "ask") -> None:
@@ -389,8 +406,8 @@ class DshEngine:
         """会话报来的模型清单：发现模型时用它（不额外开会话去问）。"""
         for model in models:
             self._catalog.setdefault(model, {"id": model, "desc": ""})
-        if efforts:
-            legal = [e for e in EFFORTS if e in efforts]
+        legal = [e for e in EFFORTS if e in efforts]
+        if legal:
             for info in self._catalog.values():
                 info.setdefault("efforts", legal)
 
@@ -401,7 +418,12 @@ class DshEngine:
         return session
 
     async def models(self) -> list[dict]:
-        return [{"efforts": list(EFFORTS), **info} for info in self._catalog.values()]
+        """能用的模型。用的是自定义的服务时只列它的模型（DSH 自带的 DeepSeek 模型在那里用不了）。"""
+        chosen = route()
+        ids = list(chosen.models) if chosen.custom else list(self._catalog)
+        for model in ids:
+            self._catalog.setdefault(model, {"id": model, "desc": ""})
+        return [{"efforts": list(EFFORTS), **self._catalog[m]} for m in ids]
 
     async def complete(self, prompt: str, model: str, schema: dict | None = None) -> str:
         """一次性的小活（总结经验、后台对比的评审）：只读、不挂界面工具，返回最后的回答。"""
@@ -445,6 +467,7 @@ class DshSession:
         self.session_id = session_id
         self.model, self.effort = model, effort
         self.values: dict[str, str] = {}   # 模型 → 设置时要传的值
+        self.efforts: list[str] = []       # 当前模型能设的思考强度（自定义服务的模型可能一档都没有）
         self.applied: tuple[str, str] = ("", "")
         self.queue: asyncio.Queue = asyncio.Queue()
         self.current: str | None = None    # 正在显示的那段话（DSH 的 messageId）
@@ -453,6 +476,8 @@ class DshSession:
     def learn(self, options: list[dict] | None, remember: Callable[[dict[str, str], list[str]], None] | None = None) -> None:
         models, efforts = read_options(options, self.proc.provider)
         self.values.update(models)
+        if options is not None:
+            self.efforts = efforts
         current = {o.get("id"): o.get("currentValue") for o in options or [] if isinstance(o, dict)}
         model = next((m for m, v in models.items() if v == current.get("model")), "")
         self.applied = (model, str(current.get("reasoning_effort") or ""))
@@ -466,10 +491,22 @@ class DshSession:
             result = await self.proc.request("session/set_config_option", {
                 "sessionId": self.session_id, "configId": "model", "value": value})
             self.learn(result.get("configOptions"))
-        if self.effort and self.effort != self.applied[1]:
+        effort = self._legal(self.effort)
+        if effort and effort != self.applied[1]:
             result = await self.proc.request("session/set_config_option", {
-                "sessionId": self.session_id, "configId": "reasoning_effort", "value": self.effort})
+                "sessionId": self.session_id, "configId": "reasoning_effort", "value": effort})
             self.learn(result.get("configOptions"))
+
+    def _legal(self, effort: str) -> str:
+        """这个模型能设的那一档：有就用它，没有就用不超过它的最高一档（都比它高就用最低的）；
+        一档都设不了（不是推理模型，或者 DSH 没报上来）就不设，用它自己的默认。"""
+        known = [e for e in self.efforts if e in LEVELS]
+        if not effort or not known:
+            return ""
+        if effort in known:
+            return effort
+        lower = [e for e in known if LEVELS.index(e) <= LEVELS.index(effort)] if effort in LEVELS else []
+        return lower[-1] if lower else known[0]
 
     def _content(self, text: str, images: list[Path]) -> list[dict]:
         blocks = []

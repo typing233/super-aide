@@ -713,3 +713,54 @@ textarea:focus { border-color: color-mix(in srgb, var(--a) 45%, transparent); }
 .data-label { min-width: 0; }
 .data-label small { overflow-wrap: anywhere; }
 .row-actions { flex: none; display: flex; gap: 2px; }
+
+/* ---------- 路由表现：四个数 + 每周的走势 ---------- */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px 14px 10px;
+  border-radius: 12px;
+  background: var(--tile);
+  border: 1px solid var(--divider);
+}
+
+.kpi-label { font-size: 12px; color: var(--text-2); }
+
+.kpi-value {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.kpi-delta, .kpi-sub {
+  margin-top: 2px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.kpi-sub { color: var(--text-3); }
+.kpi-delta.good { color: var(--ok); }
+.kpi-delta.bad { color: var(--err); }
+.kpi-delta.flat { color: var(--text-3); }
+
+.spark-box { margin-top: auto; padding-top: 8px; }
+.spark { display: block; width: 100%; height: 26px; overflow: visible; }
+.spark path { fill: none; stroke: var(--text-3); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.spark .now { fill: var(--a); stroke: var(--panel); stroke-width: 2; }
+.spark rect { fill: transparent; }
+
+.learned-use {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text-2);
+}

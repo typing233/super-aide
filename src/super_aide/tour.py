@@ -4,7 +4,8 @@
 外壳报来的事（shell/controller.py 的 happened）：
 - summon:ask / summon:act：按了快捷键，输入框出来了；submit:ask / submit:act：发出了
 - answer:ask：问答答完了（出错、被停下也算）；done:act / failed:act / stopped：操作做完、没办成、按 Esc 停下
-- view:<视图>：回答界面换了样子（input / card / pill / toast / dock）；dismiss：收起来了；dock：分步骤的回答贴到了边上
+- view:<视图>：回答界面换了样子（input / card / pill / toast / dock / mini）；dismiss：收起来了；dock：分步骤的回答贴到了边上；
+  mini：回答收成了右下角的一小条
 - tray_menu：托盘菜单打开了（app.py 接的）
 """
 
@@ -39,7 +40,7 @@ def steps() -> tuple[Step, ...]:
         Step("ask", "center", "ask", tr("提问"), advance=("summon:ask",)),
         Step("send", "input", "↵", tr("发送"), advance=("submit:ask",), jump={"dismiss": "ask", "submit:act": "stop"}),
         Step("read", advance=("answer:ask",), jump={"dismiss": "act"}),
-        Step("close", "card", "Esc", tr("关闭"), advance=("dismiss", "dock"), jump={"submit:act": "stop"}),
+        Step("close", "card", "Esc", tr("关闭"), advance=("dismiss", "dock", "mini"), jump={"submit:act": "stop"}),
         Step("act", "center", "act", tr("让它动手"), mode="act", advance=("summon:act",), stage=1),
         Step("go", "input", "↵", tr("开始"), mode="act", advance=("submit:act",), jump={"dismiss": "act"}, stage=1),
         Step("stop", "pill", "Esc", tr("随时停下"), mode="act", advance=("done:act", "failed:act", "stopped"), stage=1),

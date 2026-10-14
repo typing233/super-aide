@@ -139,7 +139,113 @@ function render() {
   renderData();
   renderUpdate();
   renderEvolve();
+  call('routerReport'); // 在引擎线程里算，算好了交给 routerReported
   if (state.focus) focusSection(state.focus);
+}
+
+// ---------- 路由表现：省了多少、质量变没变差（router/report.py） ----------
+
+function pct(x) {
+  return x === null || x === undefined ? '—' : `${Math.round(x * 100)}%`;
+}
+
+// 和之前 30 天比：变化几个百分点。upIsGood 决定颜色（出问题的比例降了是好事，省下的升了是好事）
+function deltaEl(cur, prev, upIsGood) {
+  if (cur === null || cur === undefined || prev === null || prev === undefined) return null;
+  const points = Math.round((cur - prev) * 100);
+  const node = el('div', `kpi-delta ${points === 0 ? 'flat' : (points > 0) === upIsGood ? 'good' : 'bad'}`);
+  node.textContent = points === 0 ? I18N.t('和前 30 天一样')
+    : I18N.t('较前 30 天 {sign}{n} 点', { sign: points > 0 ? '+' : '−', n: Math.abs(points) });
+  return node;
+}
+
+// 每周一个点：灰色的线，这一周的点用强调色；悬停看每周的数。少于两周有数就不画
+function sparkline(weeks, value, label) {
+  const first = weeks.findIndex((w) => w.tasks > 0);
+  if (first < 0) return null;
+  const shown = weeks.slice(first);
+  const values = shown.map(value);
+  if (values.filter((v) => v !== null).length < 2) return null;
+  const W = 112, H = 26, pad = 5;
+  const top = Math.max(...values.filter((v) => v !== null), 1e-9);
+  const x = (i) => pad + (i * (W - 2 * pad)) / Math.max(1, shown.length - 1);
+  const y = (v) => H - pad - ((H - 2 * pad) * v) / top;
+  let d = '';
+  values.forEach((v, i) => {
+    if (v === null) return;
+    d += `${i > 0 && values[i - 1] !== null ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`;
+  });
+  const last = values.length - 1;
+  const svg = [`<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${d}"/>`];
+  if (values[last] !== null) svg.push(`<circle class="now" cx="${x(last)}" cy="${y(values[last])}" r="4"/>`);
+  shown.forEach((w, i) => {
+    const left = i === 0 ? 0 : (x(i - 1) + x(i)) / 2;
+    const right = i === last ? W : (x(i) + x(i + 1)) / 2;
+    const tip = I18N.t('{week} 那周：{value}', { week: w.start.slice(5), value: label(w) });
+    svg.push(`<rect x="${left}" y="0" width="${right - left}" height="${H}"><title>${escapeHtml(tip)}</title></rect>`);
+  });
+  svg.push('</svg>');
+  const box = el('div', 'spark-box');
+  box.innerHTML = svg.join('');
+  return box;
+}
+
+function kpi(label, value, sub, delta, spark) {
+  const box = el('div', 'kpi');
+  const head = el('div', 'kpi-label');
+  head.textContent = label;
+  const big = el('div', 'kpi-value');
+  big.textContent = value;
+  box.append(head, big);
+  if (delta) box.append(delta);
+  if (sub) {
+    const small = el('div', 'kpi-sub');
+    small.textContent = sub;
+    box.append(small);
+  }
+  if (spark) box.append(spark);
+  return box;
+}
+
+function routerReported(r) {
+  const root = $('#router-report');
+  root.hidden = !r || !r.current;
+  if (root.hidden) return;
+  const cur = r.current, prev = r.previous, weeks = r.weeks || [];
+  const compare = prev.tasks >= 5; // 之前那段太少就不比
+  $('#router-verdict').textContent = r.verdict;
+  const kpis = $('#router-kpis');
+  kpis.innerHTML = '';
+  kpis.append(
+    kpi(I18N.t('任务'), String(cur.tasks), I18N.t('近 {days} 天', { days: r.window_days }), null,
+      sparkline(weeks, (w) => w.tasks, (w) => I18N.t('{n} 次', { n: w.tasks }))),
+    kpi(I18N.t('出问题'), pct(cur.problem_rate), I18N.t('{n} 次没办好', { n: cur.problems }),
+      compare ? deltaEl(cur.problem_rate, prev.problem_rate, false) : null,
+      sparkline(weeks, (w) => (w.tasks ? w.problem_rate : null), (w) => (w.tasks ? pct(w.problem_rate) : '—'))),
+    kpi(I18N.t('省下（估算）'), pct(cur.saving), I18N.t('比一直用最可靠的'),
+      compare ? deltaEl(cur.saving, prev.saving, true) : null,
+      sparkline(weeks, (w) => (w.tasks ? w.saving : null), (w) => (w.tasks ? pct(w.saving) : '—'))),
+    kpi(I18N.t('后台对比'), `${cur.duels_as_good} / ${cur.duels}`, I18N.t('更省的配置一样好'), null, null),
+  );
+  const learned = $('#router-learned');
+  learned.innerHTML = '';
+  learned.hidden = !(r.learned || []).length;
+  for (const item of r.learned || []) {
+    const row = el('div', 'row');
+    const label = el('div', 'label');
+    const name = el('span');
+    name.textContent = `${item.label} · ${I18N.t(HOTKEY_LABEL[item.mode] || item.mode)}`;
+    const small = el('small');
+    small.textContent = item.change === 'cheaper'
+      ? I18N.t('代替 {instead}，省约 {saving}%（把握 {confidence}%）',
+        { instead: item.instead, saving: Math.round(item.saving * 100), confidence: Math.round(item.confidence * 100) })
+      : I18N.t('{instead} 在这类任务上没办成过，提高了', { instead: item.instead });
+    label.append(name, small);
+    const use = el('span', 'learned-use');
+    use.textContent = item.use;
+    row.append(label, use);
+    learned.append(row);
+  }
 }
 
 // ---------- 版本和更新 ----------
@@ -1074,7 +1180,8 @@ $('#community-check').addEventListener('click', () => call('communityCheck'));
 
 // ---------- 宿主调用的接口 ----------
 
-window.settings = { reload, modelsRefreshed, stopRecording, updateChecked, dataMoved, evolveChanged, focusSection };
+window.settings = { reload, modelsRefreshed, stopRecording, updateChecked, dataMoved, evolveChanged, focusSection,
+                    routerReported };
 
 // ---------- 浏览器预览：模拟数据 ----------
 
@@ -1175,6 +1282,26 @@ const preview = {
   evolveDiff: () => '--- a/src/super_aide/shell/controller.py\n+++ b/src/super_aide/shell/controller.py\n@@ -340,6 +340,7 @@\n     def _on_esc(self) -> None:\n         self.signals.stop()\n+        self._return_focus()\n         if self.hub.is_busy(self.conv_key):\n',
   evolveApply: () => '',
   evolveUndo: () => '',
+  routerReport: () => setTimeout(() => routerReported(PREVIEW_ROUTER), 300),
+};
+
+// 路由表现的模拟数据：用了 5 周，后两周开始在翻译上换用更省的配置
+const PREVIEW_ROUTER = {
+  window_days: 30,
+  verdict: I18N.t('质量没变差：换成更省配置的任务出问题的比例 {down}%，用最可靠配置的 {ref}%；平均省了约 {saving}%。',
+    { down: 6, ref: 9, saving: 21 }),
+  current: { tasks: 112, problems: 9, problem_rate: 0.08, saving: 0.21, downgraded: 31, duels: 24, duels_as_good: 17 },
+  previous: { tasks: 64, problems: 7, problem_rate: 0.11, saving: 0.04 },
+  weeks: [0, 0, 0, 18, 26, 31, 29, 26].map((tasks, i) => ({
+    start: `2026-${i < 4 ? '09' : '10'}-${String(1 + 7 * (i % 4)).padStart(2, '0')}`, tasks,
+    problem_rate: tasks ? [0, 0, 0, 0.12, 0.1, 0.07, 0.09, 0.07][i] : null,
+    saving: tasks ? [0, 0, 0, 0, 0.03, 0.15, 0.24, 0.27][i] : null,
+  })),
+  learned: [
+    { mode: 'ask', label: '翻译', change: 'cheaper', use: 'claude-sonnet-5-5 · medium', instead: 'claude-opus-5-5 · high',
+      saving: 0.58, confidence: 0.93 },
+    { mode: 'act', label: '开发任务', change: 'stronger', use: 'gpt-6-astra · max', instead: 'gpt-6-astra · xhigh' },
+  ],
 };
 
 // ---------- 启动 ----------

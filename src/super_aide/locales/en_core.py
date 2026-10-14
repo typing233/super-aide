@@ -55,6 +55,8 @@ EN = {
     # 检测
     "还没配置模型": "No model set up yet",
     "自定义服务地址 {host}": "Custom endpoint {host}",
+    "自定义服务 {name}": "Custom service {name}",
+    "自定义服务地址还没有密钥（{name}）": "The custom endpoint has no key yet ({name})",
     "还没登录 DeepSeek 账号": "Not signed in to DeepSeek",
     "第三方云平台（Bedrock / Vertex / Foundry）": "Cloud provider (Bedrock / Vertex / Foundry)",
     "Claude 账号（长期令牌）": "Claude account (long-lived token)",
@@ -132,6 +134,10 @@ EN = {
     "；默认模型换成了 {model}（这个服务没有原来的 {old}）": "; the default model is now {model} (this service doesn't offer {old})",
     "；用的时候出错，再回来检查密钥": "; if it fails when used, come back and check the key",
     "没法自动修改 {path}（{error}），请手动配置": "Couldn't edit {path} automatically ({error}). Please set it up by hand",
+    "没法自动修改 {path}（{error}），请在 DeepSeek Harness 的模型设置里手动添加":
+        "Couldn't edit {path} automatically ({error}). Please add it in DeepSeek Harness's model settings",
+    "请在“模型”里填这个服务提供的模型（可以填几个，用逗号隔开）":
+        "Enter a model this service offers under Model (several allowed, comma-separated)",
     "Codex 没能保存 API Key（{error}）": "Codex couldn't save the API key ({error})",
     "{path} 不是有效的 JSON，没有改动它（{error}）": "{path} isn't valid JSON, so it wasn't changed ({error})",
     "{path} 的内容不是对象，没有改动它": "{path} doesn't contain an object, so it wasn't changed",
@@ -149,6 +155,8 @@ EN = {
     "引擎认证失败，请检查 Claude Code / Codex 的登录或服务地址配置。":
         "Engine sign-in failed. Check the Claude Code / Codex login or endpoint settings.",
     "引擎被限流了，稍后再试。": "The engine is rate-limited. Try again later.",
+    "这个模型现在用不了（服务没提供或没开通），可以在设置里关掉它。":
+        "This model isn't available right now (the service doesn't offer it or it isn't enabled). You can turn it off in Settings.",
     "引擎响应超时。": "The engine timed out.",
     "模型服务暂时不可用，稍后再试。": "The model service is temporarily unavailable. Try again later.",
     "已停止": "Stopped",
@@ -173,4 +181,30 @@ EN = {
     "{drive} 空间不够：要 {need}，只剩 {free}": "Not enough space on {drive}: needs {need}, only {free} free",
     "没能搬过去：{error}": "Couldn't move the data: {error}",
     "数据已经移到新位置": "Data moved to the new folder",
+
+    # 设置 → 路由表现（router/report.py）
+    "数据还少（{n} 次），多用一阵才看得出趋势。": "Not much data yet ({n} tasks). Trends show up after more use.",
+    "一直用最可靠的配置：更省的配置还没证明一样能办成，所以还没换。后台对比在攒证据（{duels} 次里 {good} 次一样好）。":
+        "Always using the most reliable setup: no cheaper setup has proven it succeeds as often yet, so nothing has "
+        "been switched. Background comparisons are gathering evidence ({good} of {duels} were as good).",
+    "开始在部分任务上换用更省的配置（{n} 次），质量还要再看几次。":
+        "Started using cheaper setups on some tasks ({n} times). A few more are needed to judge quality.",
+    "质量没变差：换成更省配置的任务出问题的比例 {down}%，用最可靠配置的 {ref}%；平均省了约 {saving}%。":
+        "Quality held: {down}% of tasks on cheaper setups had problems vs {ref}% on the most reliable one; "
+        "about {saving}% saved on average.",
+    "更省的配置出问题偏多（{down}% 对 {ref}%）：路由会根据这些失败自动退回更可靠的配置。":
+        "Cheaper setups had more problems ({down}% vs {ref}%). Routing moves back to more reliable setups "
+        "based on these failures.",
+    # 任务类型（路由学到的，设置里列出来）
+    "翻译": "Translation",
+    "写作": "Writing",
+    "报错分析": "Error analysis",
+    "代码解释": "Code explanation",
+    "界面问答": "UI questions",
+    "系统问题": "System questions",
+    "一般问答": "General questions",
+    "开发任务": "Dev tasks",
+    "浏览器操作": "Browser tasks",
+    "桌面操作": "Desktop tasks",
+    "这类任务": "These tasks",
 }

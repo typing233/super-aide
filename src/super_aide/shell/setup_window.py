@@ -253,7 +253,8 @@ class SetupWindow(WebWindow):
         message = result.message
         if result.ok:
             try:
-                used, replaced = configure.save(tool, base, key, model, offered=result.models if result.verified else [])
+                used, replaced = configure.save(tool, base, key, model, offered=result.models if result.verified else [],
+                                                api=result.api)
                 # 写明"已保存"：原来成功了也只显示一句"连上了，但没法提前确认密钥"，读起来像没生效
                 message = tr("已保存 · {detail}", detail=result.message)
                 if replaced:
@@ -270,6 +271,8 @@ class SetupWindow(WebWindow):
             self.waiting.pop(tool, None)
             if result["model"]:
                 self.models[tool] = result["model"]
+            if tool == "dsh":
+                self.chose_dsh = True  # 给 DeepSeek Harness 配了服务：就是要用它
             log.info("%s 改用自定义服务地址", detect.NAMES[tool])
         self.js(f"window.setup && setup.saved({json.dumps(tool)}, {json.dumps(result, ensure_ascii=False)})")
         self.rescan()

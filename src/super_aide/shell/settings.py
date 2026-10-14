@@ -39,6 +39,7 @@ class SettingsHost(Protocol):
     def restart(self) -> None: ...
 
     evolve: object  # EvolveManager
+    hub: object     # EngineHub
 
 
 class SettingsBridge(WindowBridge):
@@ -46,6 +47,7 @@ class SettingsBridge(WindowBridge):
 
     update_checked = Signal(dict)  # 后台线程查完更新 → 主线程交给网页
     data_moved = Signal(dict)  # 换数据位置：后台线程的进度（done/total）、出错（error）、搬完（finished）
+    router_reported = Signal(dict)  # 路由表现：引擎线程算好 → 主线程交给网页
 
     def __init__(self, host: SettingsHost, window: WebWindow | None) -> None:
         super().__init__(window)
@@ -161,6 +163,11 @@ class SettingsBridge(WindowBridge):
         return ""
 
     @Slot()
+    def routerReport(self) -> None:  # noqa: N802
+        """路由表现：在引擎线程里算（读学习记录），算好由 router_reported 交回网页。"""
+        self.host.hub.router_report(self.router_reported.emit)
+
+    @Slot()
     def openSetup(self) -> None:  # noqa: N802
         self.host.open_setup()
 
@@ -256,6 +263,7 @@ class SettingsWindow(WebWindow):
         bridge = SettingsBridge(host, self)
         bridge.update_checked.connect(self._update_checked)
         bridge.data_moved.connect(self._data_moved)
+        bridge.router_reported.connect(self._router_reported)
         self.load_page(SETTINGS_PAGE, bridge)
 
     def _js(self, code: str) -> None:
@@ -288,6 +296,9 @@ class SettingsWindow(WebWindow):
 
     def _update_checked(self, result: dict) -> None:
         self._js(f"settings.updateChecked({json.dumps(result, ensure_ascii=False)})")
+
+    def _router_reported(self, result: dict) -> None:
+        self._js(f"settings.routerReported({json.dumps(result, ensure_ascii=False)})")
 
     def _data_moved(self, result: dict) -> None:
         self._js(f"settings.dataMoved({json.dumps(result, ensure_ascii=False)})")
