@@ -1067,7 +1067,7 @@ super_aide/
 - 登录：GitHub OAuth 设备码（OAuth App "Super Aide"，client_id 公开、不需要密钥），权限 `public_repo`，令牌存在 Windows 凭据管理器；装了 gh 的直接用 `gh auth token`。
 - 提交只用 api.github.com，不需要 git：能推送的直接在主仓库建分支，否则 fork 并同步；用 API 取 main 上相关文件的当前内容套补丁，套不上让本地 Claude Code 移植（只做编译检查，完整测试交给 PR 的 CI）；Git Data API 建提交和分支 `aide/<编号>`，开 PR（标题前缀 `[aide]`，说明只有改了什么、为什么、怎么测，带问题指纹 `aide-sig:xxxx`）。开着的 PR 里已经有同一个指纹的，不新开，点 👍。
 - 隐私：PR 里只有代码改动；提交前扫描新增内容（本机用户目录、计算机名、邮箱、手机号、令牌样式的字符串、证据里出现过的 12 字以上原文），疑似就不自动提交，在设置里问。按 GitHub 服务条款 D.6（inbound=outbound），贡献按仓库的 MIT 许可授权（见 `CONTRIBUTING.md`）。
-- 维护者把关：你的超级助手每 6 小时（空闲时）或点"检查"时，只读地审开着的 `[aide]` PR（不运行 PR 里的代码）：建议合并 / 有问题 / 重复（同 #N），安全和隐私单独列。你点"合并"（squash），发版照旧由你决定。不用 GitHub Actions 里的 Claude 审 fork 的 PR：fork 的 PR 拿不到密钥，`pull_request_target` 从 2026-11-02 起在公开仓库默认禁用，而且带着密钥跑外部代码是经典的安全坑。
+- 维护者把关：你的超级助手每 6 小时（空闲时）或点"检查"时，只读地审开着的 `[aide]` PR（不运行 PR 里的代码）：建议合并 / 有问题 / 重复（同 #N），安全和隐私单独列。你点"合并"（squash）。合并以后自动发一个补丁版本（2026-10-15，`.github/workflows/auto-release.yml`：main 上的提交是合并 PR 进来的，就把补丁号加一、提交"版本 X.Y.Z"、打标签，再在那个标签上叫起 `release.yml`；带 `skip-release` 标签的 PR 不发；直接推到 main 的照旧手动打标签）。原来合并了不发版，PR #2、#3 合并两天都没人拿得到。不用 GitHub Actions 里的 Claude 审 fork 的 PR：fork 的 PR 拿不到密钥，`pull_request_target` 从 2026-11-02 起在公开仓库默认禁用，而且带着密钥跑外部代码是经典的安全坑。
 
 ### 17.8 已知限制
 

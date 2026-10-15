@@ -151,7 +151,7 @@ The website lives in `website/` and is published to GitHub Pages by `.github/wor
 
 UI text is written in Chinese first: `tr("中文")` in Python with English in `src/super_aide/locales/en_*.py`; `data-i18n` / `I18N.t("中文")` in the web pages with English in `src/super_aide/ui/web/i18n-en.js`. `tests/test_i18n.py` checks every string has an English version.
 
-Releases: push a `v*` tag (`git tag v0.2.0 && git push origin v0.2.0`) and `.github/workflows/release.yml` tests, builds the wheel and the installer, creates the GitHub Release and publishes to PyPI via Trusted Publishing (one-time setup: a PyPI pending publisher for `super-aide` with workflow `release.yml` and environment `pypi`, plus a `pypi` environment in the GitHub repo).
+Releases: push a `v*` tag (`git tag v0.2.0 && git push origin v0.2.0`) and `.github/workflows/release.yml` tests, builds the wheel and the installer, creates the GitHub Release and publishes to PyPI via Trusted Publishing (one-time setup: a PyPI pending publisher for `super-aide` with workflow `release.yml` and environment `pypi`, plus a `pypi` environment in the GitHub repo). Merging a pull request (including self-improvement and community PRs) publishes a patch release automatically via `.github/workflows/auto-release.yml`: it bumps the patch version, commits, tags and runs the same release workflow. Add the `skip-release` label before merging to opt out; direct pushes to main are released by tagging as above.
 
 ## License
 

@@ -19,7 +19,7 @@
 
 - CI 照常跑全部测试。
 - 维护者的超级助手只读地审每个 `[aide]` PR（不运行 PR 里的代码）：对不对、范围、安全、隐私、是否和别的 PR 重复，给出"建议合并 / 有问题 / 重复"。
-- **由维护者决定合并**，从不自动合并；发版也由维护者决定。合并并发版后，大家更新时，本地那份改进会被认出"已包含"，自动丢掉。
+- **由维护者决定合并**，从不自动合并。合并以后自动发一个补丁版本（维护者不想发的，合并前打上 `skip-release` 标签）。大家更新时，本地那份改进会被认出"已包含"，自动丢掉。
 
 ### 许可
 
@@ -48,7 +48,7 @@ After you sign in with GitHub in **Settings → Advanced → Contribute to the c
 
 - CI runs the full test suite as usual.
 - The maintainer's Super Aide reviews every `[aide]` PR read-only (it never runs the PR's code): correctness, scope, security, privacy, duplicates — and suggests merge, problems or duplicate.
-- **The maintainer decides what gets merged**; nothing is merged automatically, and releases are the maintainer's call. Once merged and released, everyone's local copy of that improvement is recognized as included and dropped when they update.
+- **The maintainer decides what gets merged**; nothing is merged automatically. A merged PR is published as a patch release automatically (the maintainer can add the `skip-release` label before merging to opt out). When people update, their local copy of that improvement is recognized as included and dropped.
 
 ### License
 

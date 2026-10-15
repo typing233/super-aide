@@ -1,0 +1,99 @@
+# 合并拉取请求后自动发版：你在 GitHub 上（或超级助手设置里）点了合并——包括自我改进、社区共建提的 PR——
+# 就把补丁版本号加一（0.4.1 → 0.4.2；PR 自己改了版本号就用它的）、提交"版本 X.Y.Z"、打标签，再叫起发版流程（release.yml）。
+# 不想发的 PR 打上 skip-release 标签再合并。直接推到 main 的提交（不是合并 PR 进来的）不会自动发版，照旧手动打标签。
+#
+# - 看 main 上的推送，再用接口查这个提交是不是合并 PR 进来的。不用 pull_request_target：社区 PR 来自别人的仓库，
+#   那个事件要带着写权限处理外部的 PR，而且它从 2026-11-02 起在公开仓库默认禁用。这里只检出 main（你已经点了合并）。
+# - 用 GITHUB_TOKEN 推的提交和标签不会触发工作流（这里不会自己触发自己，release.yml 也不会被标签触发），
+#   所以用 workflow_dispatch 在那个标签上叫起 release.yml（PyPI 的 Trusted Publishing 认的是 release.yml，
+#   pypi 环境只许 v 开头的标签发布）。
+name: Auto release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write       # 推版本号和标签
+  actions: write        # 叫起 release.yml
+  pull-requests: read   # 查这个提交是不是合并 PR 进来的
+
+concurrency:
+  # 连着合并几个 PR：一个一个发，版本号不会撞。排着的只留最新的一个：它从合并后的 main 发，前面合并的也都在里面
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.pr.outputs.release }}
+      number: ${{ steps.pr.outputs.number }}
+      title: ${{ steps.pr.outputs.title }}
+    steps:
+      - name: 是不是合并 PR 进来的
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '[.[] | select(.merged_at != null and .base.ref == "main")][0] // empty')
+          if [ -z "$pr" ]; then
+            echo "直接推到 main 的提交：不自动发版"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if echo "$pr" | jq -e '[.labels[].name] | index("skip-release")' > /dev/null; then
+            echo "带 skip-release 标签：不发版"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "number=$(echo "$pr" | jq -r .number)" >> "$GITHUB_OUTPUT"
+          echo "title=$(echo "$pr" | jq -r .title | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0   # 要看已有的标签
+
+      - uses: astral-sh/setup-uv@v10.2.0  # 从 v8 起只发完整版本号的标签
+        with:
+          python-version: "3.12"
+
+      - name: 定版本号
+        id: bump
+        run: python3 scripts/release/bump.py
+
+      - name: 核对 uv.lock
+        run: uv lock --check
+
+      - name: 提交、打标签
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+          CHANGED: ${{ steps.bump.outputs.changed }}
+          TITLE: ${{ needs.check.outputs.title }}
+          NUMBER: ${{ needs.check.outputs.number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$CHANGED" = "true" ]; then
+            git commit -am "版本 $VERSION" -m "合并 #$NUMBER 后自动发版：$TITLE"
+          fi
+          # 这期间 main 又进了别的提交：接在它后面再推（标签打在推上去的那个提交上）
+          for attempt in 1 2 3; do
+            git push origin HEAD:main && break
+            git pull --rebase origin main
+          done
+          git tag -a "v$VERSION" -m "超级助手（Super Aide）$VERSION"
+          git push origin "v$VERSION"
+
+      - name: 发版
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --repo "${{ github.repository }}" --ref "v${{ steps.bump.outputs.version }}"

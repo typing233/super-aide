@@ -179,6 +179,8 @@ powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1   # 编译�
 
 推送 `v` 开头的标签就会自动发版（`.github/workflows/release.yml`）：跑测试 → 打包 → 编译安装器 → 建 GitHub Release → 发布到 PyPI。
 
+合并拉取请求（包括自我改进、社区共建的 PR）以后会自动发一个补丁版本（`.github/workflows/auto-release.yml`）：版本号加一、提交、打标签，再走上面的流程。不想发的 PR 合并前打上 `skip-release` 标签。直接推到 main 的提交照下面手动发：
+
 ```powershell
 # 1. 改 pyproject.toml 里的 version（比如 0.2.0），提交
 # 2. 打标签并推送
