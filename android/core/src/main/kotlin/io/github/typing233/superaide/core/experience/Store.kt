@@ -116,6 +116,13 @@ class Store(private val file: File?, private val now: () -> Double = { System.cu
     @Synchronized
     fun remove(id: String): Boolean = (lessons.remove(id) != null).also { if (it) save() }
 
+    /** 删了又撤销：原样放回 */
+    @Synchronized
+    fun restore(lesson: Lesson) {
+        lessons[lesson.id] = lesson
+        save()
+    }
+
     private fun evict(t: Double) {
         while (lessons.size > MAX_LESSONS) lessons.remove(lessons.values.minBy { it.utility(t) }.id)
     }

@@ -75,6 +75,18 @@ class RenderTest {
         assertTrue("用 start=10 接着读" in page)
     }
 
+    @Test fun partialListsCountLoadedItems() {
+        val w = UiWindow("t", "p", "app", true, true, Box(0, 0, 10, 10), listOf(
+            n("RecyclerView", items = 50, depth = 1),
+            n("LinearLayout", clickable = true, depth = 2), n("TextView", "一", depth = 3),
+            n("LinearLayout", clickable = true, depth = 2), n("TextView", "二", depth = 3),
+            n("TextView", "列表外", depth = 1),
+            n("RecyclerView", items = 2, depth = 1),
+            n("LinearLayout", clickable = true, depth = 2), n("LinearLayout", clickable = true, depth = 2),
+        ))
+        assertEquals(listOf(50 to 2), w.partialLists())
+    }
+
     @Test fun scaleMatchesDesktopRule() {
         val s = Observation.scaleFor(1312, 2848)
         assertTrue(2848 * s <= 1568.0001)

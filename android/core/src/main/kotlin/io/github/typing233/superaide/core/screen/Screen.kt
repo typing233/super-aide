@@ -57,6 +57,16 @@ data class UiWindow(
 @Serializable
 data class Notice(val time: Long, val pkg: String, val text: String)
 
+/**
+ * 只加载了一部分的列表：(列表一共几项, 读到了几项)。读到的按列表下面一层的元素数算（列表项通常可点，都会留下）。
+ * 「问」只给提示，不自动滚动；用户点「读完整页」才翻。
+ */
+fun UiWindow.partialLists(): List<Pair<Int, Int>> = nodes.mapIndexedNotNull { i, n ->
+    if (n.items <= 0) return@mapIndexedNotNull null
+    val loaded = nodes.drop(i + 1).takeWhile { it.depth > n.depth }.count { it.depth == n.depth + 1 }
+    if (loaded in 1 until n.items) n.items to loaded else null
+}
+
 /** 召唤那一刻屏幕的样子。 */
 @Serializable
 data class Screen(

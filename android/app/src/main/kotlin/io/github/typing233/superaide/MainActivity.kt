@@ -9,24 +9,23 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as SystemSettings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,15 +34,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import io.github.typing233.superaide.a11y.AideAccessibilityService
@@ -62,19 +60,29 @@ import io.github.typing233.superaide.run.Aide
 import io.github.typing233.superaide.secure.SecretStore
 import io.github.typing233.superaide.summon.AideTileService
 import io.github.typing233.superaide.ui.AideTheme
+import io.github.typing233.superaide.ui.HistoryPage
+import io.github.typing233.superaide.ui.LessonsPage
 import io.github.typing233.superaide.ui.LocalTokens
+import io.github.typing233.superaide.ui.PrivacyPage
+import io.github.typing233.superaide.ui.SettingsChoice
+import io.github.typing233.superaide.ui.SettingsRow
+import io.github.typing233.superaide.ui.SettingsSection
+import io.github.typing233.superaide.ui.SettingsToggle
+import io.github.typing233.superaide.ui.pageBackground
 import io.github.typing233.superaide.update.Updater
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.net.URI
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-/** 设置页（App 图标点进来就是它）。改动立即生效。 */
+/** 设置页（App 图标点进来就是它）。改动立即生效；历史、经验、隐私名单是二级页面。 */
 class MainActivity : ComponentActivity() {
+    private enum class Page { HOME, HISTORY, LESSONS, PRIVACY }
+
+    private var lastReport: Report.Built? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -83,54 +91,89 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        setContent { AideTheme { SettingsScreen() } }
+        setContent {
+            AideTheme {
+                // 转屏、换深浅色时 Activity 会重建：停在原来的页面
+                var page by rememberSaveable { mutableStateOf(Page.HOME) }
+                // 从二级页面回来，停在原来滚到的位置
+                val homeScroll = rememberScrollState()
+                BackHandler(enabled = page != Page.HOME) { page = Page.HOME }
+                val back = { page = Page.HOME }
+                when (page) {
+                    Page.HOME -> SettingsScreen(homeScroll) { page = it }
+                    Page.HISTORY -> HistoryPage(Aide.history, back)
+                    Page.LESSONS -> LessonsPage(Aide.experience, back)
+                    Page.PRIVACY -> PrivacyPage(AideApp.instance.settings, Aide.apps, back)
+                }
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        Aide.settingsOpen.value = true
+    }
+
+    override fun onStop() {
+        Aide.settingsOpen.value = false
+        super.onStop()
     }
 
     @Composable
-    private fun SettingsScreen() {
+    private fun SettingsScreen(scroll: ScrollState, open: (Page) -> Unit) {
         val t = LocalTokens.current
         val settings by AideApp.instance.settings.state.collectAsState()
-        // 回到前台时刷新权限状态
+        // 从系统设置回来时刷新默认助手的状态（无障碍的状态是订阅的，连上、断开都会跟着变）
         val life by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
-        val resumed = life.isAtLeast(Lifecycle.State.RESUMED)
         Column(
-            Modifier.fillMaxSize().background(if (t.dark) Color(0xFF111113) else Color(0xFFF5F5F7)).safeDrawingPadding()
-                .verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.fillMaxSize().background(pageBackground()).safeDrawingPadding()
+                .verticalScroll(scroll).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(getString(R.string.app_name), fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = t.text)
-            Section(tr("召唤方式")) {
-                val a11y = resumed && AideAccessibilityService.instance != null
-                val route = if (resumed) AssistantRoute.status(this@MainActivity) else AssistantRoute.Status.NOT_HELD
-                Row(tr("无障碍（读屏幕、替你操作）"), if (a11y) tr("已开") else tr("去打开")) {
+            SettingsSection(tr("召唤方式")) {
+                val a11y by AideAccessibilityService.running.collectAsState()
+                val route = remember(life) { AssistantRoute.status(this@MainActivity) }
+                SettingsRow(tr("无障碍（读屏幕、替你操作）"), if (a11y) tr("已开") else tr("去打开")) {
                     startActivity(Intent(SystemSettings.ACTION_ACCESSIBILITY_SETTINGS))
                 }
                 // 从浏览器装的 App，安卓 13 起要先「允许受限设置」才能开无障碍
-                if (!a11y) Row(tr("开不了？到应用信息右上角的三个点里，选「允许受限设置」"), tr("应用信息")) {
+                if (!a11y) SettingsRow(tr("开不了？到应用信息右上角的三个点里，选「允许受限设置」"), tr("应用信息")) {
                     startActivity(Intent(SystemSettings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName")))
                 }
-                Row(tr("默认数字助手（长按电源键或手势）"), when (route) {
+                SettingsRow(tr("默认数字助手（长按电源键或手势）"), when (route) {
                     AssistantRoute.Status.SESSION, AssistantRoute.Status.ACTIVITY -> tr("已是")
                     AssistantRoute.Status.REPICK -> tr("再选一次")
                     AssistantRoute.Status.NOT_HELD -> tr("去设置")
                 }) { openAssistantSettings() }
-                Row(tr("通知栏快捷开关"), tr("添加")) { addTile() }
-                Toggle(tr("悬浮球（点一下问，长按直接做）"), settings.bubble) { on -> AideApp.instance.settings.update { it.copy(bubble = on) } }
-                Row(tr("现在试一下"), "›") { Aide.summon(this@MainActivity, Mode.ASK, "settings") }
+                SettingsRow(tr("通知栏快捷开关"), tr("添加")) { addTile() }
+                SettingsToggle(tr("悬浮球（点一下问，长按直接做）"), settings.bubble) { on -> AideApp.instance.settings.update { it.copy(bubble = on) } }
+                SettingsRow(tr("现在试一下"), "›") { Aide.summon(this@MainActivity, Mode.ASK, "settings") }
             }
             Services()
-            Section(tr("外观")) {
-                Choice(tr("主题"), listOf("system" to tr("跟随系统"), "light" to tr("浅色"), "dark" to tr("深色")), settings.theme) { v ->
+            SettingsSection(tr("外观")) {
+                SettingsChoice(tr("主题"), listOf("system" to tr("跟随系统"), "light" to tr("浅色"), "dark" to tr("深色")), settings.theme) { v ->
                     AideApp.instance.settings.update { it.copy(theme = v) }
                 }
-                Choice(tr("语言"), listOf("system" to tr("跟随系统"), "zh" to "中文", "en" to "English"), settings.language) { v ->
+                SettingsChoice(tr("语言"), listOf("system" to tr("跟随系统"), "zh" to "中文", "en" to "English"), settings.language) { v ->
                     AideApp.instance.settings.update { it.copy(language = v) }
                     I18n.lang = Aide.uiLang()
                     recreate()
                 }
             }
             RouterReport()
-            HistoryList()
+            SettingsSection(tr("记录和隐私")) {
+                val conversations = remember { Aide.history.list().size }
+                val lessons = remember { Aide.experience.all().size }
+                SettingsRow(tr("历史"), tr("{n} 条", "n" to conversations) + " ›") { open(Page.HISTORY) }
+                SettingsRow(tr("经验"), tr("{n} 条", "n" to lessons) + " ›", sub = tr("踩过的坑，碰到相似情况才会想起")) { open(Page.LESSONS) }
+                SettingsRow(tr("隐私名单"), tr("{n} 个 App", "n" to settings.blockedApps.size) + " ›", sub = tr("这些 App 不读、不截、不操作")) {
+                    open(Page.PRIVACY)
+                }
+                SettingsToggle(tr("后台对比（空闲时用更便宜的配置重答一遍，让强模型评判）"), settings.shadowEval) { on ->
+                    AideApp.instance.settings.update { it.copy(shadowEval = on) }
+                }
+            }
             UpdateSection()
         }
     }
@@ -141,24 +184,45 @@ class MainActivity : ComponentActivity() {
         val settings by AideApp.instance.settings.state.collectAsState()
         var report by remember { mutableStateOf("") }
         var adding by remember { mutableStateOf(false) }
+        var confirmDelete by remember { mutableStateOf<String?>(null) }
         val scope = rememberCoroutineScope()
-        Section(tr("模型服务")) {
+        LaunchedEffect(confirmDelete) { if (confirmDelete != null) { delay(3_000); confirmDelete = null } }
+        SettingsSection(tr("模型服务")) {
             if (settings.services.isEmpty()) Text(tr("还没有模型服务：加一个才能用。"), color = t.text2, fontSize = 14.sp, modifier = Modifier.padding(12.dp))
             for (svc in settings.services) {
-                Text("${svc.name} · ${URI(svc.baseUrl).host ?: svc.baseUrl}", color = t.text, fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(start = 12.dp, top = 10.dp))
+                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${svc.name} · ${runCatching { URI(svc.baseUrl).host }.getOrNull() ?: svc.baseUrl}", color = t.text,
+                        fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                    // 删除要点两次：第一次变成"再点一次删除"
+                    Text(if (confirmDelete == svc.id) tr("再点一次删除") else tr("删除"), color = if (confirmDelete == svc.id) t.err else t.text3,
+                        fontSize = 13.sp, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
+                            if (confirmDelete != svc.id) { confirmDelete = svc.id; return@clickable }
+                            AideApp.instance.secrets.remove(SecretStore.serviceKey(svc.id))
+                            AideApp.instance.settings.update { s ->
+                                s.copy(services = s.services.filter { it.id != svc.id }, models = s.models.filter { it.service != svc.id })
+                            }
+                            confirmDelete = null
+                        }.padding(10.dp))
+                }
                 for (m in settings.models.filter { it.service == svc.id }) {
-                    Toggle(m.id, m.enabled) { on ->
+                    SettingsToggle(m.id, m.enabled, trailing = {
+                        // 思考强度上限：点一下换一档
+                        Text(tr("上限 {effort}", "effort" to m.maxEffort.wire), color = t.text3, fontSize = 12.sp,
+                            modifier = Modifier.padding(end = 6.dp).clip(RoundedCornerShape(8.dp)).clickable {
+                                val next = Effort.entries[(m.maxEffort.ordinal + 1) % Effort.entries.size]
+                                AideApp.instance.settings.update { s -> s.copy(models = s.models.map { if (it == m) it.copy(maxEffort = next) else it }) }
+                            }.padding(horizontal = 8.dp, vertical = 6.dp))
+                    }) { on ->
                         AideApp.instance.settings.update { s -> s.copy(models = s.models.map { if (it == m) it.copy(enabled = on) else it }) }
                     }
                 }
             }
-            Row(tr("测试连接"), "›") {
+            SettingsRow(tr("测试连接"), "›") {
                 report = tr("测试中…")
                 scope.launch { report = probeAll() }
             }
             if (report.isNotBlank()) Text(report, color = t.text2, fontSize = 12.sp, modifier = Modifier.padding(12.dp))
-            Row(tr("添加服务"), if (adding) "×" else "+") { adding = !adding }
+            SettingsRow(tr("添加服务"), if (adding) "×" else "+") { adding = !adding }
             if (adding) AddService { adding = false }
         }
     }
@@ -171,20 +235,21 @@ class MainActivity : ComponentActivity() {
         var models by remember { mutableStateOf("") }
         var wire by remember { mutableStateOf(Wire.ANTHROPIC) }
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Choice(tr("协议"), listOf(Wire.ANTHROPIC.name to "Anthropic", Wire.OPENAI_RESPONSES.name to "OpenAI Responses",
+            SettingsChoice(tr("协议"), listOf(Wire.ANTHROPIC.name to "Anthropic", Wire.OPENAI_RESPONSES.name to "OpenAI Responses",
                 Wire.OPENAI_CHAT.name to "OpenAI Chat"), wire.name) { wire = Wire.valueOf(it) }
             OutlinedTextField(name, { name = it }, label = { Text(tr("名字")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(base, { base = it }, label = { Text(tr("服务地址")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(key, { key = it }, label = { Text("API key") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(models, { models = it }, label = { Text(tr("模型（逗号分隔）")) }, modifier = Modifier.fillMaxWidth())
-            Row(tr("保存"), "✓") {
+            SettingsRow(tr("保存"), "✓") {
                 val ids = models.split(Regex("[,，;；\\s]+")).filter { it.isNotBlank() }
-                if (base.isBlank() || key.isBlank() || ids.isEmpty()) return@Row
+                if (base.isBlank() || key.isBlank() || ids.isEmpty()) return@SettingsRow
                 val id = "s" + System.currentTimeMillis()
                 AideApp.instance.secrets.put(SecretStore.serviceKey(id), key.trim())
                 AideApp.instance.settings.update { s ->
                     s.copy(
-                        services = s.services + Service(id, name.ifBlank { URI(base.trim()).host ?: base }, wire, base.trim(), bearer = wire == Wire.ANTHROPIC && !base.contains("anthropic.com")),
+                        services = s.services + Service(id, name.ifBlank { runCatching { URI(base.trim()).host }.getOrNull() ?: base }, wire, base.trim(),
+                            bearer = wire == Wire.ANTHROPIC && !base.contains("anthropic.com")),
                         models = s.models + ids.map { ModelEntry(id, it, vision = !it.contains("deepseek")) },
                     )
                 }
@@ -197,18 +262,20 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun RouterReport() {
         val t = LocalTokens.current
-        var built by remember { mutableStateOf<Report.Built?>(null) }
+        // 先显示上次算好的：从二级页面回来时页面高度不变，滚动位置才回得去
+        var built by remember { mutableStateOf(lastReport) }
         LaunchedEffect(Unit) {
             built = withContext(Dispatchers.Default) {
                 runCatching {
                     Report.build(Aide.routing.router, java.io.File(filesDir, "router/decisions.jsonl"), System.currentTimeMillis() / 1000.0)
                 }.getOrNull()
             }
+            lastReport = built
         }
         val b = built ?: return
         if (b.current.tasks == 0) return
         val c = b.current
-        Section(tr("路由表现")) {
+        SettingsSection(tr("路由表现")) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(b.verdict, color = t.text, fontSize = 14.sp)
                 Text(
@@ -231,24 +298,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable
-    private fun HistoryList() {
-        val t = LocalTokens.current
-        val entries = remember { Aide.history.list().take(20) }
-        if (entries.isEmpty()) return
-        val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
-        Section(tr("历史")) {
-            for (e in entries) {
-                val first = e.turns.firstOrNull() ?: continue
-                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Text(first.question.lineSequence().first().take(60), color = t.text, fontSize = 14.sp, maxLines = 1)
-                    Text("${fmt.format(Date(e.time))} · ${e.app} · ${first.model} · ${first.effort}" + if (first.ok) "" else " · ✗",
-                        color = t.text3, fontSize = 12.sp)
-                }
-            }
-        }
-    }
-
     /** 版本和更新 */
     @Composable
     private fun UpdateSection() {
@@ -265,8 +314,8 @@ class MainActivity : ComponentActivity() {
             Updater.State.Installing -> tr("正在安装…")
             is Updater.State.Failed -> tr("打开发布页")
         }
-        Section(tr("版本")) {
-            Row(Updater.current, status) {
+        SettingsSection(tr("版本")) {
+            SettingsRow(Updater.current, status) {
                 when (s) {
                     is Updater.State.Available -> scope.launch { Updater.install(this@MainActivity, s.release) }
                     is Updater.State.Failed -> startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Updater.RELEASES)))
@@ -276,58 +325,6 @@ class MainActivity : ComponentActivity() {
             }
             if (s is Updater.State.Failed) Text(s.message, color = LocalTokens.current.err, fontSize = 12.sp,
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp))
-        }
-    }
-
-    @Composable
-    private fun Section(title: String, content: @Composable () -> Unit) {
-        val t = LocalTokens.current
-        Column {
-            Text(title, color = t.text2, fontSize = 13.sp, modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (t.dark) Color(0xFF1C1C1F) else Color.White)) {
-                content()
-            }
-        }
-    }
-
-    @Composable
-    private fun Row(label: String, value: String, onClick: () -> Unit) {
-        val t = LocalTokens.current
-        androidx.compose.foundation.layout.Row(
-            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(label, color = t.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
-            Text(value, color = t.askA, fontSize = 15.sp)
-        }
-    }
-
-    @Composable
-    private fun Toggle(label: String, on: Boolean, onChange: (Boolean) -> Unit) {
-        val t = LocalTokens.current
-        androidx.compose.foundation.layout.Row(
-            Modifier.fillMaxWidth().clickable { onChange(!on) }.padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(label, color = t.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
-            Switch(on, onChange)
-        }
-    }
-
-    @Composable
-    private fun Choice(label: String, options: List<Pair<String, String>>, value: String, onPick: (String) -> Unit) {
-        val t = LocalTokens.current
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(label, color = t.text2, fontSize = 13.sp)
-            Spacer(Modifier.height(6.dp))
-            androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for ((v, name) in options) {
-                    val sel = v == value
-                    Text(name, color = if (sel) Color.White else t.text, fontSize = 14.sp,
-                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(if (sel) t.askA else t.hover)
-                            .clickable { onPick(v) }.padding(horizontal = 12.dp, vertical = 6.dp))
-                }
-            }
         }
     }
 

@@ -250,6 +250,11 @@ private fun Footer(c: CardState) {
             context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("answer", c.answer))
         }.padding(horizontal = 8.dp, vertical = 6.dp))
         Spacer(Modifier.weight(1f))
+        if (c.fullPage && !c.handOff) Text(
+            tr("读完整页"), color = t.accent(Mode.ASK), fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+            modifier = Modifier.clip(CircleShape).background(t.hover).clickable { Aide.readFullPage(context) }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+        )
         if (c.handOff) Text(
             tr("让我来做"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
             modifier = Modifier.clip(CircleShape).background(t.gradient(Mode.ACT)).clickable { Aide.handOff() }
