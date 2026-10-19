@@ -54,7 +54,7 @@ class Overlays(private val svc: AideAccessibilityService) {
 
     fun start(scope: CoroutineScope) {
         job = scope.launch(Dispatchers.Main) {
-            combine(Aide.surface, AideApp.instance.settings.state) { s, set -> s to set.bubble }.collect { (surface, bubbleOn) ->
+            combine(Aide.surface, AideApp.instance.settings.state, Aide.settingsOpen) { s, set, own -> s to (set.bubble && !own) }.collect { (surface, bubbleOn) ->
                 if (surface == Aide.Surface.PILL) pill.show() else pill.hide()
                 if (bubbleOn && surface == Aide.Surface.HIDDEN) bubble.show() else bubble.hide()
                 keyFilter(Aide.card.value?.running == true && Aide.card.value?.mode == Mode.ACT && surface == Aide.Surface.PILL)

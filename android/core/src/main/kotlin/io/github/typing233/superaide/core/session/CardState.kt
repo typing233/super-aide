@@ -33,6 +33,8 @@ data class CardState(
     val reported: String? = null,
     /** 用户的评价：1 / -1 / 0 */
     val rating: Int = 0,
+    /** 屏幕上的列表只加载了一部分：问答答完后给一个「读完整页」 */
+    val fullPage: Boolean = false,
 ) {
     fun reduce(e: Event): CardState = when (e.type) {
         "route" -> copy(route = listOfNotNull(e.data["model"], e.data["effort"]).joinToString(" · "))

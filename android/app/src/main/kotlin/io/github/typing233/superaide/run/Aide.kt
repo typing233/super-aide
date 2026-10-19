@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import io.github.typing233.superaide.AideApp
 import io.github.typing233.superaide.a11y.AideAccessibilityService
+import io.github.typing233.superaide.a11y.FullRead
 import io.github.typing233.superaide.a11y.PhoneTools
 import io.github.typing233.superaide.a11y.ScreenReader
 import io.github.typing233.superaide.a11y.SelfHeal
@@ -20,6 +21,7 @@ import io.github.typing233.superaide.core.llm.Part
 import io.github.typing233.superaide.core.prompts.Prompts
 import io.github.typing233.superaide.core.screen.EnvText
 import io.github.typing233.superaide.core.screen.Observation
+import io.github.typing233.superaide.core.screen.partialLists
 import io.github.typing233.superaide.core.screen.Screen
 import io.github.typing233.superaide.core.session.CardState
 import io.github.typing233.superaide.core.experience.Learn
@@ -69,6 +71,8 @@ object Aide {
     private val _mode = MutableStateFlow(Mode.ASK)
     /** 输入框当前的模式（左边的切换钮） */
     val mode: StateFlow<Mode> = _mode
+    /** 设置页在前台：悬浮球先藏起来（免得挡住右边的开关） */
+    val settingsOpen = MutableStateFlow(false)
 
     private var capture: Deferred<Capture>? = null
     private var session: Session? = null
@@ -243,7 +247,36 @@ object Aide {
         _card.value = CardState(mode)
     }
 
-    private fun run(question: String, followup: Boolean, display: String = question) {
+    /**
+     * 「读完整页」：先把界面收起来（盖着的话读不到下面的 App），把列表翻到底读完再翻回去，
+     * 然后带着完整的内容把刚才的问题再答一遍（作为同一段对话的追问）。
+     */
+    fun readFullPage(context: Context) {
+        val c = _card.value ?: return
+        val pkg = frontApp
+        // 收成进度小条（不挡着下面的 App）：用户看得到在做什么，进程也不会被系统当成后台冻住
+        _card.value = c.copy(fullPage = false, running = true, done = false, transient = tr("正在把这一页翻到底读一遍…"))
+        _surface.value = Surface.PILL
+        Diag.log("fullpage", "pkg=$pkg")
+        app.scope.launch {
+            delay(700)
+            val svc = AideAccessibilityService.instance
+            Diag.log("fullpage.read", "svc=${svc != null}")
+            val result = svc?.let { FullRead.read(it, pkg, app.settings.value.blockedApps.toSet()) }
+            _surface.value = Surface.CARD
+            withContext(Dispatchers.Main) { openHost(context, Mode.ASK, "fullpage") }
+            if (result == null || result.text.isBlank()) {
+                _card.value = c.copy(fullPage = false, error = tr("没能翻完这一页：没找到能滚动的列表。"))
+                return@launch
+            }
+            val env = "【屏幕上的文字】把「${apps.label(pkg)}」里的列表从当前位置往下翻了 ${result.pages} 屏读到的全部内容（逐字原文）：\n" +
+                result.text.take(40_000)
+            run("用户点了「读完整页」：环境里是把列表往下翻完读到的全部内容。请根据完整内容重新回答刚才的问题：${c.question}",
+                followup = true, display = tr("读完整页后重新回答"), envOverride = env)
+        }
+    }
+
+    private fun run(question: String, followup: Boolean, display: String = question, envOverride: String? = null) {
         val s = session ?: return
         val state = (_card.value ?: CardState(s.mode)).next(display)
         _card.value = state
@@ -254,11 +287,18 @@ object Aide {
             try {
                 val cap = if (followup) withContext(Dispatchers.Default) { recapture() } else (capture?.await() ?: Capture(null, null))
                 frontApp = cap.screen?.windows?.firstOrNull { it.type == "app" }?.pkg ?: frontApp
-                val env = cap.screen?.let { EnvText.render(it, EnvText.Extras(apps::label, Device.line(app), cap.clipboard)) }
+                val env = envOverride ?: cap.screen?.let { EnvText.render(it, EnvText.Extras(apps::label, Device.line(app), cap.clipboard)) }
                     ?: tr("（没有读到屏幕：无障碍服务没开，或者是受保护的页面）")
+                // 问答第一轮：列表只加载了一部分，答完给一个「读完整页」
+                val lists = if (s.mode == Mode.ASK && !followup) cap.screen?.windows?.firstOrNull { it.type == "app" }?.partialLists().orEmpty() else emptyList()
+                val partial = lists.isNotEmpty()
                 val images = listOfNotNull(cap.shot?.let { Part.Image(it) })
                 val notes = buildList {
                     if (cap.screen == null) add("这次没能读取屏幕内容（无障碍服务没开）。需要看屏幕才能回答的，请让用户在设置里打开超级助手的无障碍权限。")
+                }.toMutableList()
+                lists.firstOrNull()?.let { (total, loaded) ->
+                    notes += "屏幕上的列表只加载了一部分（共 $total 项，现在读到 $loaded 项）。用户要的是完整内容时，请用户点回答下面的「读完整页」，" +
+                        "你会把列表翻到底读一遍再答；不要让用户自己去滑、再叫你一次。"
                 }
                 val t = routing.task(s.mode, question, frontApp, frontText(cap), errorLines(cap))
                 task = t
@@ -275,6 +315,7 @@ object Aide {
                 seenLessons += turnLessons
                 if (lessons.isNotEmpty()) Diag.log("recall", lessons.joinToString { it.title })
                 val r = s.ask(question, env, images, notes, Recall.render(lessons))
+                if (partial) _card.value = _card.value?.copy(fullPage = true)
                 learn(s, question, followup, r.tools, env)
             } catch (e: CancellationException) {
                 withContext(NonCancellable) { onEvent(Event.done(mapOf("ok" to false, "stopped" to true, "reason" to "interrupted"))) }

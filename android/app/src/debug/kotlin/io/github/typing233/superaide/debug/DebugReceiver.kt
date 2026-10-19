@@ -116,6 +116,14 @@ class DebugReceiver : BroadcastReceiver() {
 
             "stop" -> Aide.stop()
 
+            // 点「读完整页」，等重新回答完
+            "fullpage" -> {
+                val offered = Aide.card.value?.fullPage
+                withContext(Dispatchers.Main) { Aide.readFullPage(context) }
+                val c = withTimeoutOrNull(5 * 60_000L) { Aide.card.first { it?.done == true && it.question.isNotBlank() && it.earlier.isNotEmpty() } }
+                Diag.log("debug.fullpage.result", "offered=$offered ok=${c?.ok} error=${c?.error}\n${c?.answer}")
+            }
+
             // 点「让我来做」，等这一轮操作做完
             "handoff" -> {
                 val before = Aide.card.value?.question

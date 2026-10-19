@@ -36,5 +36,22 @@ class History(context: Context) {
         .mapNotNull { f -> runCatching { json.decodeFromString(Entry.serializer(), f.readText()) }.getOrNull() }
         .sortedByDescending { it.time }
 
-    fun delete(id: String) = File(dir, "$id.json").delete()
+    /** 删掉：先挪进回收站，几秒内能撤销（restore），过时再清掉（purge） */
+    fun delete(id: String) {
+        val trash = File(dir, "trash").apply { mkdirs() }
+        File(dir, "$id.json").renameTo(File(trash, "$id.json"))
+    }
+
+    fun restore(id: String) {
+        File(dir, "trash/$id.json").renameTo(File(dir, "$id.json"))
+    }
+
+    fun purge(id: String) {
+        File(dir, "trash/$id.json").delete()
+    }
+
+    /** 上次没来得及清的（撤销倒计时里 App 被关了）：打开历史页时清掉 */
+    fun purgeAll() {
+        File(dir, "trash").listFiles()?.forEach { it.delete() }
+    }
 }
