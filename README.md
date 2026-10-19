@@ -121,6 +121,16 @@ A custom endpoint is written into each tool's own config (with a `*.super-aide.b
 - **Settings**: hotkeys, theme, **language** (follow system / 中文 / English), apps it never looks at, which models each engine may use, autostart.
 - **Updates**: Settings → General → Version. It checks when you open Settings; click Update and Super Aide quits, the installer installs the new version and reopens it. Settings and history are kept.
 
+## Android
+
+There's also a phone version: **[download `SuperAide.apk`](https://github.com/typing233/super-aide/releases/latest/download/SuperAide.apk)** (Android 11 or later, about 4 MB).
+
+- **Install**: open the APK on your phone. Then, in the app, add a model service (Anthropic, OpenAI-compatible or DeepSeek: address and key, with a test button) and turn on accessibility. Installed from a browser? Android 13+ asks you to allow it first: App info → three dots at the top right → **Allow restricted settings**.
+- **Summon** it with the floating bubble (tap to ask, long-press to act), the Quick Settings tile, or set it as your **digital assistant app** (Settings → Apps → Default apps).
+- **Ask / Act** work like on the PC: it reads the exact text of every window on screen, answers, or taps and types for you. Tap the chip left of the input box to switch; when an answer says how to do something, tap **Do it for me**. Stop a running task with the button on the progress pill or in the notification.
+- Routing, background comparisons and the lesson library work the same way as on the PC. Self-improvement isn't available on the phone.
+- **Updates**: Settings → Version. Some phones turn accessibility off when the app is force-stopped; run `adb shell pm grant io.github.typing233.superaide android.permission.WRITE_SECURE_SETTINGS` once and it turns itself back on.
+
 ## Self-improvement
 
 - **When**: a task fails (network or sign-in problems don't count); you press `Esc` during an action and say what the assistant got wrong (no answer means it wasn't its fault); you click 👎; or you write a suggestion in **Settings → Advanced**.

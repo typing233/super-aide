@@ -134,6 +134,16 @@ https://github.com/user-attachments/assets/3c84873e-12d7-41b2-b592-83ed046d6131
 - **设置**：快捷键、主题、**语言**（跟随系统 / 中文 / English）、哪些应用不看（默认不看密码管理器）、每个引擎可以用哪些模型、思考强度的上限、开机自启。
 - **更新**：设置 → 通用 → 版本。打开设置时会顺手查一下有没有新版本；点"更新"后超级助手先退出，安装器装好新版本再自动打开，设置和记录都保留。
 
+## 安卓版
+
+手机上也能用：**[下载 `SuperAide.apk`](https://github.com/typing233/super-aide/releases/latest/download/SuperAide.apk)**（安卓 11 及以上，约 4 MB）。
+
+- **安装**：在手机上打开 APK 装好。打开 App，在「模型服务」里加一个服务（Anthropic、OpenAI 兼容或 DeepSeek：地址和 key，可以点测试），再打开无障碍。从浏览器装的，安卓 13 起要先在「应用信息」右上角的三个点里选**允许受限设置**，才能开无障碍。
+- **召唤**：悬浮球（点一下问，长按直接做）、通知栏快捷开关，或者在「设置 → 应用 → 默认应用 → 数字助理应用」里选超级助手。
+- **问 / 做**和电脑上一样：读出屏幕上每个窗口的原文，回答你，或者替你点、替你输入。输入框左边点一下切换；回答里说要动手的，点**让我来做**。正在做的事，点进度条上的停止键或通知里的「停止」就停。
+- 智能路由、后台对比、经验库和电脑版一样会学习；自我改进只在电脑上有。
+- **更新**：设置 → 版本。有的手机清理后台会顺手把无障碍关掉：电脑上执行一次 `adb shell pm grant io.github.typing233.superaide android.permission.WRITE_SECURE_SETTINGS`，之后它会自己打开回来。
+
 ## 自我改进
 
 - **什么时候**：一次任务没办成（网络、登录之类的故障不算）；操作时你按 `Esc` 停下，并在提示里说了是助手哪里没做好（不答就当不是它的问题）；你点了 👎；你在 **设置 → 高级** 里写了建议。
@@ -193,6 +203,7 @@ git push origin v0.2.0
 1. 在 [PyPI](https://pypi.org) 注册账号，到 **Account settings → Publishing** 添加一个 "pending publisher"：项目名 `super-aide`，填你的 GitHub 用户名和仓库名，工作流 `release.yml`，环境 `pypi`。这样发布时不用保存任何密码或令牌。
 2. 在 GitHub 仓库的 **Settings → Environments** 里新建一个叫 `pypi` 的环境（可以设成需要你确认才发布）。
 3. 可选：代码签名。[SignPath Foundation](https://signpath.org) 给开源项目免费签名（需要开源许可证、已经发布过、有一定使用量）。申请通过后按 `release.yml` 里的注释加上签名步骤。
+4. 安卓版的签名证书放在仓库的 **Settings → Secrets and variables → Actions** 里：`ANDROID_KEYSTORE_B64`（证书文件的 base64）、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。证书一旦丢了，新版就装不上旧版之上（只能卸载重装），原件和密码要另外备份。安卓端的开发说明见 [docs/android/m0-report.md](docs/android/m0-report.md) 和 `scripts/android/`。
 
 ## 许可证
 

@@ -1,5 +1,6 @@
 # 官网（GitHub Pages，https://typing233.github.io/super-aide/）：website/ 有改动、发完新版本、或者手动触发时发布。
-# 发布时把最新版的安装器放到网站上（download/SuperAideSetup.exe），再写一份 latest.json（版本、大小、校验和）。
+# 发布时把最新版的安装器和安卓 APK 放到网站上（download/SuperAideSetup.exe、download/SuperAide.apk），
+# 再写一份 latest.json（版本、大小、校验和；安卓的在 android 里，App 内更新先看它）。
 # 网页上的下载按钮优先用网站上这份：国内访问 github.io 往往比 github.com 的下载链接稳。
 #
 # 第一次用之前，在仓库的 Settings → Pages 里把 Source 选成 "GitHub Actions"。
@@ -44,6 +45,14 @@ jobs:
           tag=$(jq -r .tag_name <<<"$release")
           url=$(jq -r '.assets[] | select(.name == "SuperAideSetup.exe") | .browser_download_url' <<<"$release")
           curl -fsSL --retry 3 "$url" -o website/download/SuperAideSetup.exe
+          apk_url=$(jq -r '.assets[] | select(.name == "SuperAide.apk") | .browser_download_url' <<<"$release")
+          android=null
+          if [ -n "$apk_url" ]; then
+            curl -fsSL --retry 3 "$apk_url" -o website/download/SuperAide.apk
+            android=$(jq -n --argjson size "$(stat -c %s website/download/SuperAide.apk)" \
+              --arg sha256 "$(sha256sum website/download/SuperAide.apk | cut -d' ' -f1)" --arg github "$apk_url" \
+              '{file: "download/SuperAide.apk", size: $size, sha256: $sha256, github: $github}')
+          fi
           jq -n \
             --arg version "${tag#v}" \
             --arg tag "$tag" \
@@ -51,8 +60,9 @@ jobs:
             --argjson size "$(stat -c %s website/download/SuperAideSetup.exe)" \
             --arg sha256 "$(sha256sum website/download/SuperAideSetup.exe | cut -d' ' -f1)" \
             --arg github "$url" \
+            --argjson android "$android" \
             '{version: $version, tag: $tag, published: $published, size: $size, sha256: $sha256,
-              file: "download/SuperAideSetup.exe", github: $github}' > website/latest.json
+              file: "download/SuperAideSetup.exe", github: $github, android: $android}' > website/latest.json
           cat website/latest.json
 
       - uses: actions/configure-pages@v6

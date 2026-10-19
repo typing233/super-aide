@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:recognitionService="io.github.typing233.superaide.assist.StubRecognitionService"
+    android:sessionService="io.github.typing233.superaide.assist.AideSessionService"
+    android:settingsActivity="io.github.typing233.superaide.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false"
+    android:supportsLocalInteraction="false" />

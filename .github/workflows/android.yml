@@ -1,0 +1,54 @@
+# 安卓端：改到 android/ 或它用到的桌面文件时，跑 :core 的单元测试、检查英文对照表、编译调试版 APK。
+name: Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "scripts/android/**"
+      - "src/super_aide/ui/web/i18n-en.js"
+      - "src/super_aide/locales/**"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "scripts/android/**"
+      - "src/super_aide/ui/web/i18n-en.js"
+      - "src/super_aide/locales/**"
+      - ".github/workflows/android.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: 英文对照表是最新的
+        run: python ../scripts/android/gen_strings.py --check
+
+      - name: 单元测试（:core）
+        run: ./gradlew --no-daemon :core:test
+
+      - name: 编译调试版
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 7

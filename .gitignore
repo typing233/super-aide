@@ -16,3 +16,12 @@ video/out/
 # 发布官网时生成：最新版安装器和版本信息（.github/workflows/pages.yml）
 website/download/
 website/latest.json
+# 安卓端（android/）的构建产物、本机 SDK 路径和签名证书
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/**/bin/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Super Aide</string>
+    <string name="a11y_description">Lets Super Aide read the text on your screen when you ask, and tap and type for you when you ask it to do something. Nothing is read until you summon it.</string>
+</resources>
