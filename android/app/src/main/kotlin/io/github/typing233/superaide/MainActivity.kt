@@ -12,6 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,7 +42,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import io.github.typing233.superaide.a11y.AideAccessibilityService
@@ -81,6 +81,8 @@ import java.net.URI
 class MainActivity : ComponentActivity() {
     private enum class Page { HOME, HISTORY, LESSONS, PRIVACY }
 
+    private var lastReport: Report.Built? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -93,10 +95,12 @@ class MainActivity : ComponentActivity() {
             AideTheme {
                 // 转屏、换深浅色时 Activity 会重建：停在原来的页面
                 var page by rememberSaveable { mutableStateOf(Page.HOME) }
+                // 从二级页面回来，停在原来滚到的位置
+                val homeScroll = rememberScrollState()
                 BackHandler(enabled = page != Page.HOME) { page = Page.HOME }
                 val back = { page = Page.HOME }
                 when (page) {
-                    Page.HOME -> SettingsScreen { page = it }
+                    Page.HOME -> SettingsScreen(homeScroll) { page = it }
                     Page.HISTORY -> HistoryPage(Aide.history, back)
                     Page.LESSONS -> LessonsPage(Aide.experience, back)
                     Page.PRIVACY -> PrivacyPage(AideApp.instance.settings, Aide.apps, back)
@@ -116,21 +120,20 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun SettingsScreen(open: (Page) -> Unit) {
+    private fun SettingsScreen(scroll: ScrollState, open: (Page) -> Unit) {
         val t = LocalTokens.current
         val settings by AideApp.instance.settings.state.collectAsState()
-        // 回到前台时刷新权限状态
+        // 从系统设置回来时刷新默认助手的状态（无障碍的状态是订阅的，连上、断开都会跟着变）
         val life by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
-        val resumed = life.isAtLeast(Lifecycle.State.RESUMED)
         Column(
             Modifier.fillMaxSize().background(pageBackground()).safeDrawingPadding()
-                .verticalScroll(rememberScrollState()).padding(16.dp),
+                .verticalScroll(scroll).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(getString(R.string.app_name), fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = t.text)
             SettingsSection(tr("召唤方式")) {
-                val a11y = resumed && AideAccessibilityService.instance != null
-                val route = if (resumed) AssistantRoute.status(this@MainActivity) else AssistantRoute.Status.NOT_HELD
+                val a11y by AideAccessibilityService.running.collectAsState()
+                val route = remember(life) { AssistantRoute.status(this@MainActivity) }
                 SettingsRow(tr("无障碍（读屏幕、替你操作）"), if (a11y) tr("已开") else tr("去打开")) {
                     startActivity(Intent(SystemSettings.ACTION_ACCESSIBILITY_SETTINGS))
                 }
@@ -259,13 +262,15 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun RouterReport() {
         val t = LocalTokens.current
-        var built by remember { mutableStateOf<Report.Built?>(null) }
+        // 先显示上次算好的：从二级页面回来时页面高度不变，滚动位置才回得去
+        var built by remember { mutableStateOf(lastReport) }
         LaunchedEffect(Unit) {
             built = withContext(Dispatchers.Default) {
                 runCatching {
                     Report.build(Aide.routing.router, java.io.File(filesDir, "router/decisions.jsonl"), System.currentTimeMillis() / 1000.0)
                 }.getOrNull()
             }
+            lastReport = built
         }
         val b = built ?: return
         if (b.current.tasks == 0) return

@@ -269,8 +269,8 @@ object Aide {
                 _card.value = c.copy(fullPage = false, error = tr("没能翻完这一页：没找到能滚动的列表。"))
                 return@launch
             }
-            val env = "【屏幕上的文字】把「${apps.label(pkg)}」里的列表从当前位置往下翻了 ${result.pages} 屏读到的全部内容（逐字原文）：\n" +
-                result.text.take(40_000)
+            val env = "【屏幕上的文字】把「${apps.label(pkg)}」里的列表从当前位置往下翻了 ${result.pages} 屏读到的全部内容（逐字原文；" +
+                "列表报告的总项数常把分隔线、分组标题也算进去，比实际条目多是正常的）：\n" + result.text.take(40_000)
             run("用户点了「读完整页」：环境里是把列表往下翻完读到的全部内容。请根据完整内容重新回答刚才的问题：${c.question}",
                 followup = true, display = tr("读完整页后重新回答"), envOverride = env)
         }
@@ -285,7 +285,12 @@ object Aide {
         if (s.mode == Mode.ACT) _surface.value = Surface.PILL else _surface.value = Surface.CARD
         job = app.scope.launch {
             try {
-                val cap = if (followup) withContext(Dispatchers.Default) { recapture() } else (capture?.await() ?: Capture(null, null))
+                // 读完整页时环境已经是翻完读到的全文，不再截一次（这时屏幕上大半是我们自己的卡片）
+                val cap = when {
+                    envOverride != null -> Capture(null, null)
+                    followup -> withContext(Dispatchers.Default) { recapture() }
+                    else -> capture?.await() ?: Capture(null, null)
+                }
                 frontApp = cap.screen?.windows?.firstOrNull { it.type == "app" }?.pkg ?: frontApp
                 val env = envOverride ?: cap.screen?.let { EnvText.render(it, EnvText.Extras(apps::label, Device.line(app), cap.clipboard)) }
                     ?: tr("（没有读到屏幕：无障碍服务没开，或者是受保护的页面）")
@@ -294,10 +299,10 @@ object Aide {
                 val partial = lists.isNotEmpty()
                 val images = listOfNotNull(cap.shot?.let { Part.Image(it) })
                 val notes = buildList {
-                    if (cap.screen == null) add("这次没能读取屏幕内容（无障碍服务没开）。需要看屏幕才能回答的，请让用户在设置里打开超级助手的无障碍权限。")
+                    if (cap.screen == null && envOverride == null) add("这次没能读取屏幕内容（无障碍服务没开）。需要看屏幕才能回答的，请让用户在设置里打开超级助手的无障碍权限。")
                 }.toMutableList()
                 lists.firstOrNull()?.let { (total, loaded) ->
-                    notes += "屏幕上的列表只加载了一部分（共 $total 项，现在读到 $loaded 项）。用户要的是完整内容时，请用户点回答下面的「读完整页」，" +
+                    notes += "屏幕上的列表只加载了一部分（列表报告共 $total 项，现在读到 $loaded 项；总数常把分隔线、分组标题这类没有文字的项也算进去）。用户要的是完整内容时，请用户点回答下面的「读完整页」，" +
                         "你会把列表翻到底读一遍再答；不要让用户自己去滑、再叫你一次。"
                 }
                 val t = routing.task(s.mode, question, frontApp, frontText(cap), errorLines(cap))

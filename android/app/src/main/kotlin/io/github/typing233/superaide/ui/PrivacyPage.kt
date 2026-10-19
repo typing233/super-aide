@@ -54,9 +54,11 @@ fun PrivacyPage(settings: SettingsStore, apps: Apps, onBack: () -> Unit) {
             SettingsSection("") {
                 for (pkg in s.blockedApps) {
                     Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // 没装的（默认名单里的密码管理器）只有包名
+                        val label = apps.label(pkg)
                         Column(Modifier.weight(1f)) {
-                            Text(apps.label(pkg), color = t.text, fontSize = 15.sp)
-                            Text(pkg, color = t.text3, fontSize = 12.sp)
+                            Text(label, color = t.text, fontSize = 15.sp)
+                            Text(if (label != pkg) pkg else tr("没有安装"), color = t.text3, fontSize = 12.sp)
                         }
                         Icon(Icons.Filled.Close, tr("移除"), tint = t.text3,
                             modifier = Modifier.size(40.dp).clip(CircleShape).clickable {
@@ -73,7 +75,8 @@ fun PrivacyPage(settings: SettingsStore, apps: Apps, onBack: () -> Unit) {
                 if (query.isEmpty()) Text(tr("搜索 App"), color = t.text3, fontSize = 15.sp)
             }
             val shown = installed.filter { it.pkg !in s.blockedApps && (query.isBlank() || query.lowercase() in it.label.lowercase() || query.lowercase() in it.pkg) }
-            LazyColumn(Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp)).background(cardBackground())) {
+            // 结果少时卡片跟着变矮，多了才占满剩下的高度
+            LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).clip(RoundedCornerShape(14.dp)).background(cardBackground())) {
                 items(shown, key = { it.pkg }) { a ->
                     Column(Modifier.fillMaxWidth().clickable {
                         settings.update { it.copy(blockedApps = it.blockedApps + a.pkg) }

@@ -141,7 +141,7 @@
   "走了弯路、被纠正或者你说「记住」的对话，结束后会总结成一条经验；碰到相似情况才会想起，平时不带。": "When a conversation took a detour, got corrected, or you said \"remember\", it's summed up as a lesson afterwards. A lesson is recalled only when a similar situation comes up.",
   "还没有经验": "No lessons yet",
   "适用：{when}": "When: {when}",
-  "想起过 {uses} 次，其中 {fails} 次没帮上": "Recalled {uses} times, didn't help {fails} times",
+  "想起过 {uses} 次，其中 {fails} 次没帮上": "Recalled {uses}× · {fails} didn't help",
   "加到隐私名单": "Add to privacy list",
   "隐私名单": "Privacy list",
   "这些 App 的界面不读、不截，也不替你操作。": "These apps are never read, captured or operated.",
@@ -155,7 +155,10 @@
   "这些 App 不读、不截、不操作": "Never read, captured or operated",
   "后台对比（空闲时用更便宜的配置重答一遍，让强模型评判）": "Background comparison (re-answer with a cheaper setup when idle; a strong model judges)",
   "再点一次删除": "Tap again to delete",
-  "上限 {effort}": "max {effort}",
+  "上限 {effort}": "up to {effort}",
   "历史": "History",
-  "正在把这一页翻到底读一遍…": "Reading the whole page…"
+  "正在把这一页翻到底读一遍…": "Reading the whole page…",
+  "还没想起过": "Not recalled yet",
+  "想起过 {uses} 次": "Recalled {uses}×",
+  "没有安装": "Not installed"
 }

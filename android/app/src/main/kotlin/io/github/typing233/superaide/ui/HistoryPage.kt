@@ -20,8 +20,10 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,9 +46,11 @@ import java.util.Locale
 fun HistoryPage(history: History, onBack: () -> Unit) {
     val t = LocalTokens.current
     val entries = remember { history.purgeAll(); mutableStateListOf<History.Entry>().apply { addAll(history.list()) } }
-    var query by remember { mutableStateOf("") }
-    var open by remember { mutableStateOf<String?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var open by rememberSaveable { mutableStateOf<String?>(null) }
     var removed by remember { mutableStateOf<Pair<Int, History.Entry>?>(null) }
+    // 撤销回来的换个 key：列表按 key 记着滑动状态，原 key 会让它停在"已滑走"
+    val restores = remember { mutableStateMapOf<String, Int>() }
     val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
     val shown = entries.filter { e ->
         query.isBlank() || e.turns.any { query.lowercase() in it.question.lowercase() || query.lowercase() in it.answer.lowercase() } ||
@@ -62,7 +66,7 @@ fun HistoryPage(history: History, onBack: () -> Unit) {
             if (shown.isEmpty()) Text(if (entries.isEmpty()) tr("还没有记录") else tr("没有找到"), color = t.text3, fontSize = 14.sp,
                 modifier = Modifier.padding(12.dp))
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(shown, key = { it.id }) { e ->
+                items(shown, key = { "${it.id}#${restores[it.id] ?: 0}" }) { e ->
                     val state = rememberSwipeToDismissBoxState(confirmValueChange = { v ->
                         // 可能连着回调两次：已经删掉的不再处理（不然会把自己从回收站清掉，撤销不了）
                         if (v == SwipeToDismissBoxValue.EndToStart && e in entries) {
@@ -86,6 +90,7 @@ fun HistoryPage(history: History, onBack: () -> Unit) {
         removed?.let { (index, e) ->
             UndoBar(tr("已删除"), key = e.id, onUndo = {
                 history.restore(e.id)
+                restores[e.id] = (restores[e.id] ?: 0) + 1
                 entries.add(index.coerceIn(0, entries.size), e)
                 removed = null
             }, onExpire = {

@@ -14,6 +14,8 @@ import io.github.typing233.superaide.core.screen.Notice
 import io.github.typing233.superaide.diag.Diag
 import io.github.typing233.superaide.run.Aide
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -34,6 +36,7 @@ class AideAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        _running.value = true
         Diag.log("a11y.connected")
         runCatching { overlays.start(AideApp.instance.scope) }.onFailure { Diag.error("overlays", it) }
     }
@@ -61,7 +64,7 @@ class AideAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
-        if (instance === this) instance = null
+        if (instance === this) { instance = null; _running.value = false }
         runCatching { marks.hide() }
         runCatching { overlays.stop() }
         Diag.log("a11y.destroyed")
@@ -168,5 +171,9 @@ class AideAccessibilityService : AccessibilityService() {
         @Volatile
         var instance: AideAccessibilityService? = null
             private set
+
+        private val _running = MutableStateFlow(false)
+        /** 界面用：服务连上/断开时跟着变（装完、更新完系统要过一会儿才连上） */
+        val running: StateFlow<Boolean> = _running
     }
 }
