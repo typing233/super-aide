@@ -13,7 +13,7 @@ on:
   workflow_run:
     workflows: ["Release"]
     types: [completed]
-  workflow_dispatch:
+  workflow_dispatch:   # release.yml 发完也会叫一次（自动发版时上面的 workflow_run 不触发）
 
 permissions:
   contents: read

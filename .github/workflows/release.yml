@@ -120,6 +120,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write   # 发完叫起官网的更新
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -151,6 +152,13 @@ jobs:
             artifacts/SHA256SUMS.txt
             artifacts/dist/*
             artifacts/apk/*.apk
+
+      # 官网要放上新的安装器和 APK。pages.yml 本来在这里跑完后自己触发（workflow_run），
+      # 但自动发版时这里是 auto-release.yml 用内置令牌叫起的，这样起的运行不会再触发别的工作流：直接叫它
+      - name: 更新官网
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
 
   pypi:
     needs: build
