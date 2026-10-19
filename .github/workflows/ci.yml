@@ -25,5 +25,8 @@ jobs:
       - name: 单元测试
         run: uv run python -m pytest -q
 
+      - name: 安卓端的路由和经验库对照数据是最新的
+        run: uv run python scripts/android/gen_fixtures.py --check
+
       - name: 编译安装器
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_installer.ps1 -Repo "${{ github.repository }}"

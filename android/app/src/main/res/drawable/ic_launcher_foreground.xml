@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 和网站图标一样：蓝紫渐变的圆（website/assets/icon.svg） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M54,30a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="78"
+                android:endY="78"
+                android:startX="30"
+                android:startY="30"
+                android:type="linear">
+                <item android:color="#FF5B8CFF" android:offset="0" />
+                <item android:color="#FF9B6BFF" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

@@ -2,8 +2,9 @@
 #   1. 跑单元测试；
 #   2. 生成随包发布的锁定版本清单和仓库信息（scripts/release/prepare.py，标签必须和 pyproject.toml 的版本一致）；
 #   3. 打包（wheel + sdist），编译安装器 SuperAideSetup.exe；
-#   4. 建 GitHub Release（安装包、安装器、校验和）；
-#   5. 发布到 PyPI（用 PyPI 的 Trusted Publishing，不用保存密码或令牌）。
+#   4. 打安卓版 APK（android/，用仓库 Secrets 里的签名证书签名；没打成不挡 Windows 版发布）；
+#   5. 建 GitHub Release（安装包、安装器、APK、校验和）；
+#   6. 发布到 PyPI（用 PyPI 的 Trusted Publishing，不用保存密码或令牌）。
 #
 # 第一次用之前要做一次设置，见 README 的"发版"一节。
 # 合并拉取请求后由 auto-release.yml 打好标签，再用 workflow_dispatch 在那个标签上叫起这里（它推的标签触发不了这里）。
@@ -66,8 +67,56 @@ jobs:
           name: installer
           path: installer-dist/
 
+  # 安卓版：签名证书在仓库 Secrets 里（ANDROID_KEYSTORE_B64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD）。
+  # 证书丢了以后发的新版就装不上旧版之上，原件和密码另外备份着。
+  android:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: 签名证书
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > release.jks
+          printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
+
+      - name: 单元测试、打包
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ./gradlew --no-daemon :core:test :app:assembleRelease -PversionName="$version"
+          mkdir -p ../apk-dist
+          cp app/build/outputs/apk/release/app-release.apk "../apk-dist/SuperAide-$version.apk"
+          cp app/build/outputs/apk/release/app-release.apk ../apk-dist/SuperAide.apk
+
+      - name: 核对签名
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$apksigner" verify --print-certs ../apk-dist/SuperAide.apk
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: apk
+          path: apk-dist/
+
   github-release:
-    needs: build
+    needs: [build, android]
+    # 安卓版没打成也照样发 Windows 版
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -75,6 +124,13 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+
+      - name: 校验和（加上 APK）
+        run: |
+          cd artifacts
+          cp installer/SHA256SUMS.txt SHA256SUMS.txt
+          if [ -d apk ]; then (cd apk && sha256sum *.apk) >> SHA256SUMS.txt; fi
+          cat SHA256SUMS.txt
 
       - uses: softprops/action-gh-release@v3
         with:
@@ -84,11 +140,17 @@ jobs:
             **下载 `SuperAideSetup.exe`，双击安装**（约 100 KB，运行环境装的时候再下载）。安装器还没有代码签名，Windows 提示"已保护你的电脑"时点 **更多信息 → 仍要运行**。已经装过的：设置 → 通用 → 版本 → 更新。
 
             **Download `SuperAideSetup.exe` and run it** (about 100 KB; it fetches the runtime while installing). The installer isn't code-signed yet: if Windows says "Windows protected your PC", click **More info → Run anyway**. Already installed? Settings → General → Version → Update.
+
+            **安卓版：下载 `SuperAide.apk` 装到手机上**（安卓 11 及以上）。打开后在「模型服务」里填服务地址和 key，再打开无障碍；从浏览器装的，开无障碍前要先在应用信息右上角的三个点里选「允许受限设置」。已经装过的：设置 → 版本 → 更新。
+
+            **Android: install `SuperAide.apk` on your phone** (Android 11+). Add a model service (URL and key) in the app, then turn on accessibility. Installed from a browser? First open App info, tap the three dots and choose "Allow restricted settings". Already installed? Settings → Version → Update.
           generate_release_notes: true
+          fail_on_unmatched_files: false
           files: |
             artifacts/installer/SuperAideSetup.exe
-            artifacts/installer/SHA256SUMS.txt
+            artifacts/SHA256SUMS.txt
             artifacts/dist/*
+            artifacts/apk/*.apk
 
   pypi:
     needs: build

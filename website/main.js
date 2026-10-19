@@ -111,6 +111,9 @@
       if (!info || !info.version) return;
       document.querySelectorAll("[data-version]").forEach((el) => (el.textContent = `v${info.version}`));
       if (info.size) document.querySelectorAll("[data-size]").forEach((el) => (el.textContent = `${Math.round(info.size / 1024)} KB`));
+      if (info.android && info.android.file) {
+        document.querySelectorAll("a[data-download-android]").forEach((a) => (a.href = info.android.file));
+      }
       if (info.file) {
         document.querySelectorAll("a[data-download]").forEach((a) => (a.href = info.file));
         if (info.github) document.querySelectorAll("a[data-github-download]").forEach((a) => (a.href = info.github));

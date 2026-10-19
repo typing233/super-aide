@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">超级助手</string>
+    <string name="a11y_description">让超级助手在你提问时读取屏幕上的文字，在你让它动手时替你点击和输入。不召唤它就不会读取任何内容。</string>
+</resources>

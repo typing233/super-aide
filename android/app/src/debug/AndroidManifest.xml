@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 只在 debug / staging 版本里：adb 发调试命令。要 DUMP 权限，只有 adb shell 能发。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <receiver
+            android:name="io.github.typing233.superaide.debug.DebugReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="io.github.typing233.superaide.DEBUG" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

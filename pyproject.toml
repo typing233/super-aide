@@ -74,6 +74,6 @@ artifacts = ["src/super_aide/_release/*"]
 "tests" = "super_aide/_source/tests"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/spikes", "/installer/out", "/.github", "/website", "/video"]
+exclude = ["/spikes", "/installer/out", "/.github", "/website", "/video", "/android"]
 # 打包时先打 sdist、再从 sdist 打 wheel：sdist 里也要带上发版时生成的文件，不然 wheel 里就没有了
 artifacts = ["src/super_aide/_release/*"]
