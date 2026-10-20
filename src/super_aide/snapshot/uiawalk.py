@@ -21,6 +21,7 @@ from typing import Any
 TREE_CHILDREN = 2
 P_RECT, P_TYPE, P_CLASS, P_IS_CONTROL, P_OFFSCREEN, P_HAS_TEXT = 30001, 30003, 30012, 30016, 30022, 30040
 DOCUMENT = 50030
+WINDOW = 50032
 #: Chromium 系放网页的那个子窗口在 UIA 里的类名。它下面就是网页（文档区）
 WEB_HOST = "Chrome_RenderWidgetHostHWND"
 CONNECTION_TIMEOUT_MS, TRANSACTION_TIMEOUT_MS = 2000, 5000
@@ -84,7 +85,7 @@ def walk(uia: Any, root: Any, request: Any, *, seconds: float, max_nodes: int,
     enter(e) 返回 False 时不进 e 的子树（e 本身照样返回），比如不进网页的文档区。"""
     limit_timeouts(uia)
     deadline = time.perf_counter() + seconds
-    condition = uia.CreatePropertyCondition(P_OFFSCREEN, False) if on_screen else uia.CreateTrueCondition()
+    condition = on_screen_condition(uia) if on_screen else uia.CreateTrueCondition()
     out: list = []
     stack = [root]
     while stack and len(out) < max_nodes and time.perf_counter() < deadline:
@@ -102,6 +103,15 @@ def walk(uia: Any, root: Any, request: Any, *, seconds: float, max_nodes: int,
         out.extend(kept)
         stack.extend(e for e in reversed(kept) if enter is None or enter(e))
     return out[:max_nodes]
+
+
+def on_screen_condition(uia: Any) -> Any:
+    """"在屏幕上"的子元素，再加上所有窗口类的子元素（不管它说自己在不在屏幕上）。
+    Win11 的 XAML 应用（新版记事本、终端、设置……）把浮出的面板放在一个 Popup 窗口里，这个窗口报"不在屏幕上"、
+    大小是 0，里面的控件却都在屏幕上：只按"在屏幕上"筛，整块面板都看不到（实测记事本按 Ctrl+H 以后，
+    替换框、"全部替换"一个都没有）。同一层的窗口很少，不会像几千行的表格那样拖慢。"""
+    return uia.CreateOrCondition(uia.CreatePropertyCondition(P_OFFSCREEN, False),
+                                 uia.CreatePropertyCondition(P_TYPE, WINDOW))
 
 
 def walk_siblings(uia: Any, root: Any, request: Any, *, seconds: float, max_nodes: int,

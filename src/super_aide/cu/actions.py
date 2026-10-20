@@ -297,7 +297,8 @@ class Runner:
         el = self.element(a)
         in_browser = self.s.obs is not None and self.s.obs.process.lower() in browser.BROWSERS
         if (el is not None and a.method != "mouse" and a.replace and el.role in ("Edit", "ComboBox")
-                and "value" in el.patterns and "readonly" not in el.states and not in_browser):
+                and "value" in el.patterns and "readonly" not in el.states and not in_browser
+                and not _standard_dialog(self.s.hwnd)):
             c = _control(el)
             _with_timeout(lambda: c.GetValuePattern().SetValue(a.text))
             if a.enter:
@@ -568,6 +569,16 @@ def _same_process_popup(x: int, y: int, el: Element) -> bool:
 def win32gui_title(hwnd: int) -> str:
     info = win32.window_info(hwnd)
     return info.title if info else str(hwnd)
+
+
+def _standard_dialog(hwnd: int) -> bool:
+    """系统的标准对话框（另存为、打开、确认框，窗口类 #32770）。它的文件名框不认 UIA 直接设的值：
+    看着填上了，按回车却存成了旧名字（实测一次另存为绕了 114 秒、20 步）。这里要像人一样打字。"""
+    if not hwnd:
+        return False
+    root = ctypes.windll.user32.GetAncestor(hwnd, GA_ROOT) or hwnd
+    info = win32.window_info(root)
+    return bool(info) and info.class_name == "#32770"
 
 
 def find_window(spec: str, own_pid: int) -> int:

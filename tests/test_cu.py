@@ -173,3 +173,31 @@ def test_hidden_input_boxes_are_not_reported_as_failed_typing():
     assert actions._hidden_input(Element(1, "Edit", "Terminal input", (-9999, -9999, -9999, -9999)))
     assert actions._hidden_input(Element(2, "Edit", "", (100, 200, 101, 201)))  # Monaco 的 1×1 输入框
     assert not actions._hidden_input(Element(3, "Edit", "搜索", (100, 200, 400, 230)))
+
+
+def test_standard_dialogs_get_real_typing(monkeypatch):
+    """系统标准对话框（另存为、打开）不认 UIA 直接设的值：在里面要像人一样打字（实测设值后回车存成了旧名字）。"""
+    from types import SimpleNamespace
+
+    from super_aide.cu import actions
+
+    monkeypatch.setattr(actions.ctypes.windll.user32, "GetAncestor", lambda hwnd, flag: hwnd, raising=False)
+    kinds = {1: "#32770", 2: "Notepad"}
+    monkeypatch.setattr(actions.win32, "window_info", lambda hwnd: SimpleNamespace(class_name=kinds[hwnd]))
+    assert actions._standard_dialog(1) and not actions._standard_dialog(2) and not actions._standard_dialog(0)
+
+
+def test_on_screen_walk_keeps_popup_windows():
+    """只取"在屏幕上"的子元素时，窗口类的子元素不管它说什么都要：Win11 XAML 应用的浮出面板放在一个
+    报"不在屏幕上"、大小为 0 的 Popup 窗口里（实测记事本的替换栏整块看不到）。"""
+    from super_aide.snapshot import uiawalk
+
+    class FakeUia:
+        def CreatePropertyCondition(self, pid, value):  # noqa: N802 - UIA 的命名
+            return ("prop", pid, value)
+
+        def CreateOrCondition(self, a, b):  # noqa: N802
+            return ("or", a, b)
+
+    assert uiawalk.on_screen_condition(FakeUia()) == (
+        "or", ("prop", uiawalk.P_OFFSCREEN, False), ("prop", uiawalk.P_TYPE, uiawalk.WINDOW))
