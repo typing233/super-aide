@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -37,7 +38,7 @@ def test_patch_is_read_only_for_ask_and_full_access_for_act(tmp_path):
     ask = dsh.patch_text("ask", "deepseek-account", "共享指令 {{不是变量}}", tmp_path)
     assert 'mode: "read-only"' in ask and 'defaultPreset: "read-only"' in ask and 'policy: "never"' in ask
     assert "{{不是变量}}" not in ask and "{ {不是变量} }" in ask  # DSH 的提示词模板认不出的变量会让请求失败
-    assert "{{model}}" in ask and "{{cwd}}" in ask
+    assert "{{model}}" in ask
     assert "- id: session-log-deepseek" in ask and "enabled: false" in ask  # 不上传会话日志
     assert 'provider: "deepseek-account"' in ask
     assert "customSkillDirs" in ask  # 技能目录存在时才加
@@ -46,11 +47,49 @@ def test_patch_is_read_only_for_ask_and_full_access_for_act(tmp_path):
     assert "customSkillDirs" not in act
 
 
+def persona(patch: str, key: str) -> str:
+    line = next(x for x in patch.splitlines() if x.strip().startswith(key + ":"))
+    return json.loads(line.split(":", 1)[1].strip())  # JSON 写法的字符串也是合法的 YAML
+
+
 def test_patch_values_are_valid_yaml_scalars():
     text = dsh.patch_text("ask", "deepseek-account", 'C:\\路径 "引号"\n第二行')
-    line = next(x for x in text.splitlines() if x.strip().startswith("personaSuffix:"))
-    value = json.loads(line.split(":", 1)[1].strip())  # JSON 写法的字符串也是合法的 YAML
-    assert value.endswith('C:\\路径 "引号"\n第二行') and value.startswith("Your working directory is {{cwd}}.")
+    assert persona(text, "personaSuffix") == 'C:\\路径 "引号"\n第二行'
+
+
+#: DSH 的提示词模板自己提供的变量（2026-10-19 实测桌面版 0.2.1-rc.2：只有 provider、model，没有 cwd 了）
+DSH_VARIABLES = {"provider": "deepseek-account", "model": "deepseek-flash"}
+
+
+def dsh_render(text: str, variables: dict[str, str]) -> str:
+    """照 DSH 的规则渲染一段提示词模板：{{名字}} 得是写对了的、它注册过的变量，否则抛错（DSH 在发请求之前就让
+    整次组装失败）；后面再没有 }} 的单个 {{ 算普通文字。"""
+    out, last = "", 0
+    start = text.find("{{")
+    while start >= 0:
+        group = re.match(r"\{\{([^{}]*)\}\}", text[start:])
+        if group is None:
+            if text.find("}}", start + 2) >= 0:
+                raise ValueError(f"malformed prompt variable reference at {text[start:start + 16]!r}")
+            out, last = out + text[last:start + 2], start + 2
+        elif not re.fullmatch(r"[a-z][a-z0-9_]*", group[1]):
+            raise ValueError(f"malformed prompt variable reference {group[0]!r}")
+        elif group[1] not in variables:
+            raise ValueError(f"unknown prompt variable {group[0]!r}")
+        else:
+            out, last = out + text[last:start] + variables[group[1]], start + len(group[0])
+        start = text.find("{{", last)
+    return out + text[last:]
+
+
+@pytest.mark.parametrize("mode", ["ask", "act"])
+def test_persona_only_uses_variables_dsh_provides(tmp_path, mode):
+    """2026-10-19：DSH 自动更新以后不再注册 {{cwd}}（工作目录它自己每次都带上），personaSuffix 开头那句
+    "Your working directory is {{cwd}}." 让每次请求都报 unknown prompt variable，问答、后台小活全失败。"""
+    text = dsh.patch_text(mode, "deepseek-account", "共享指令 {{cwd}} {{不是变量}}\n只有开头的 {{", tmp_path)
+    assert dsh_render(persona(text, "personaPrefix"), DSH_VARIABLES) == (
+        "You are Super Aide, a Windows desktop assistant powered by the deepseek-flash model.")
+    assert dsh_render(persona(text, "personaSuffix"), DSH_VARIABLES) == "共享指令 { {cwd} } { {不是变量} }\n只有开头的 { {"
 
 
 def test_mcp_servers_match_the_other_engines():
