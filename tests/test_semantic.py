@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from super_aide.config import Config
+from super_aide.decision import Decider
 from super_aide.experience import recall, semantic, store
 from super_aide.experience.recall import Situation
 
@@ -118,7 +120,7 @@ def test_idle_embedder_is_unloaded_and_reloaded_on_summon(monkeypatch, tmp_path)
 
     loads = []
     semantic = SimpleNamespace(embedder=emb, ready=lambda: loads.append(1))
-    hub = SimpleNamespace(semantic=semantic, conversations={}, _embed_used=0.0)
+    hub = SimpleNamespace(semantic=semantic, conversations={}, _embed_used=0.0, decider=Decider(Config()))
     monkeypatch.setattr(emb, "downloaded", lambda: True)
     EngineHub.prewarm(hub)                        # 召唤了：在后台加载
     for _ in range(50):

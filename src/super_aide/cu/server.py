@@ -166,7 +166,8 @@ def observe_window(window: str = "", screenshot: bool = True, ocr: bool = False)
 @tool(modes=("act",))
 def act(actions: list[Action], observe_after: bool = True) -> list:
     """按顺序执行一组动作（失败就停在那一步），默认执行完再观察一次并返回新的截图。
-    动作 do 可以是：click、double_click、right_click、hover、type、key、scroll、drag、select、toggle、focus、wait、wait_for。
+    动作 do 可以是：click、double_click、right_click、hover、type、key、scroll、drag、select、toggle、focus、wait、wait_for、wait_gone。
+    等事情做完用 wait_for（等某个文字出现）或 wait_gone（等某个文字消失，比如"正在下载"、运行中才有的"中断"按钮），比固定 wait 准。
     目标用 id（observe 里的编号）或截图坐标 x、y。编号只在最近一次观察里有效。"""
     with LOCK:
         session = Session(STATE["obs"], BLOCKED, OWN_PID)
@@ -310,13 +311,13 @@ def _element_text(el) -> str:
     try:
         pattern = c.GetTextPattern()
         if pattern:
-            return pattern.DocumentRange.GetText(200_000)
+            return snapshot_uia.newlines(pattern.DocumentRange.GetText(200_000))
     except Exception:  # noqa: BLE001
         pass
     try:
         pattern = c.GetValuePattern()
         if pattern:
-            return pattern.Value
+            return snapshot_uia.newlines(pattern.Value or "")
     except Exception:  # noqa: BLE001
         pass
     names = [c.Name] + [child.Name for child, _ in auto.WalkControl(c, maxDepth=6) if child.Name]

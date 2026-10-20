@@ -42,6 +42,8 @@ const state = {
   armed: null,           // 那个按钮和它原来的字：超时或点了别的确认时变回去
   ticker: null,         // 正在改进的那一行的计时
   moving: null,          // 换数据位置：选好的去处、搬的进度、出错的原因
+  decisionOpen: false,   // 判断模型的三个输入框展开着
+  decisionTest: null,    // 测试：'testing' | { ok, ms } | { error }
 };
 
 // ---------- 基础 ----------
@@ -129,6 +131,7 @@ function render() {
   renderEngines();
   renderBlocked();
   $('#shadow-eval').classList.toggle('on', d.router.shadow_eval !== false);
+  renderDecision();
   $('#autostart').classList.toggle('on', Boolean(d.autostart));
   // 浏览器操作没接通时才出现这一行，写着怎么接通（只有用 Codex 官方账号时才要接通）；
   // 平时不显示：用的是哪一套、接通了没有，都没什么要你做的
@@ -1135,6 +1138,70 @@ $('#shadow-eval').addEventListener('click', () => {
   save();
 });
 
+// ---------- 判断模型（可选）：地址、密钥、模型写在配置的 [decision] 里，改了就存 ----------
+
+function decisionConfigured() {
+  const c = state.data.decision || {};
+  return Boolean((c.url || '').trim() && (c.model || '').trim());
+}
+
+function renderDecision() {
+  const c = state.data.decision || (state.data.decision = { url: '', key: '', model: '' });
+  const t = state.decisionTest;
+  let note;
+  if (t === 'testing') note = I18N.t('正在测试…');
+  else if (t && t.error) note = I18N.t('没连上：{error}', { error: t.error });
+  else if (t) note = I18N.t('能用，一次 {ms} 毫秒', { ms: t.ms });
+  else if (decisionConfigured()) note = I18N.t('{model} · 已启用', { model: c.model });
+  else note = I18N.t('可选。用 Jev 类模型判断任务难度、追问是不是在说没答好、经验对不对得上，比关键词准，一次不到 1 秒；不配也照常用');
+  $('#decision-note').textContent = note;
+  $('#decision-form').hidden = !state.decisionOpen;
+  $('#decision-toggle').textContent = I18N.t(state.decisionOpen ? '收起' : decisionConfigured() ? '更改' : '设置');
+  for (const name of ['url', 'key', 'model']) {
+    const input = $(`#decision-${name}`);
+    if (document.activeElement !== input) input.value = c[name] || '';
+  }
+  $('#decision-test').disabled = t === 'testing' || !decisionConfigured();
+}
+
+function syncDecision() {
+  const c = state.data.decision;
+  let changed = false;
+  for (const name of ['url', 'key', 'model']) {
+    const value = $(`#decision-${name}`).value.trim();
+    if (value !== (c[name] || '')) {
+      c[name] = value;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+$('#decision-toggle').addEventListener('click', () => {
+  state.decisionOpen = !state.decisionOpen;
+  renderDecision();
+  if (state.decisionOpen) $('#decision-url').focus();
+});
+for (const name of ['url', 'key', 'model']) {
+  $(`#decision-${name}`).addEventListener('change', async () => {
+    if (!syncDecision()) return;
+    state.decisionTest = null;
+    await save();
+    renderDecision();
+  });
+}
+$('#decision-test').addEventListener('click', async () => {
+  if (syncDecision()) await save();
+  state.decisionTest = 'testing';
+  renderDecision();
+  call('testDecision'); // 联网：在后台测，测完交给 decisionTested
+});
+
+function decisionTested(result) {
+  state.decisionTest = result;
+  renderDecision();
+}
+
 $('#autostart').addEventListener('click', async () => {
   const on = !state.data.autostart;
   const problem = await call('setAutostart', on);
@@ -1181,7 +1248,7 @@ $('#community-check').addEventListener('click', () => call('communityCheck'));
 // ---------- 宿主调用的接口 ----------
 
 window.settings = { reload, modelsRefreshed, stopRecording, updateChecked, dataMoved, evolveChanged, focusSection,
-                    routerReported };
+                    routerReported, decisionTested };
 
 // ---------- 浏览器预览：模拟数据 ----------
 
@@ -1193,6 +1260,7 @@ const PREVIEW_DATA = {
   privacy: { blocked_apps: ['KeePass.exe', '1Password.exe', 'Bitwarden.exe'], clipboard_max_age_s: 300 },
   safety: { blocklist: false },
   router: { llmrouter_path: '', pin_engine: '', shadow_eval: true, shadow_daily: 20 },
+  decision: { url: '', key: '', model: '' },
   engines: {
     claude: {
       enabled: true,
@@ -1283,6 +1351,7 @@ const preview = {
   evolveApply: () => '',
   evolveUndo: () => '',
   routerReport: () => setTimeout(() => routerReported(PREVIEW_ROUTER), 300),
+  testDecision: () => setTimeout(() => decisionTested({ ok: true, ms: 642 }), 600),
 };
 
 // 路由表现的模拟数据：用了 5 周，后两周开始在翻译上换用更省的配置

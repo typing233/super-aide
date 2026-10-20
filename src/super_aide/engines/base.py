@@ -51,7 +51,7 @@ MODEL_UNAVAILABLE = re.compile(
     r"|model\W[^\n]{0,80}?\b(does not exist|not (found|supported|available|allowed|enabled)|is not (supported|available)"
     r"|unavailable|has been deprecated|no access)"
     r"|(do(es)?n'?t|do(es)? not) have access to (the |this )?model|(issue|problem) with the selected model"
-    r"|not_found_error[^\n]{0,60}model|no (available )?(channels?|providers?|distributors?) (for|under|available)[^\n]{0,60}model"
+    r"|not_found_error[^\n]{0,60}model|(no|unknown) (available )?(channels?|providers?|distributors?) (for|under|available)[^\n]{0,60}model"
     r"|无可用渠道|没有可用的?渠道|模型不存在|不支持(该|此|这个)?模型|模型[^\n]{0,20}(不可用|不存在|已下线|未开通|无权限)",
     re.IGNORECASE)
 RATE_LIMITED = re.compile(r"\b429\b|rate.?limit|too many requests", re.IGNORECASE)

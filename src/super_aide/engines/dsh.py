@@ -107,8 +107,10 @@ def patch_text(mode: str, provider_id: str | dshconf.Route, instructions: str, s
         '      danger-full-access: {sandbox: "danger-full-access", approval: "never"}',
         f"    defaultPreset: {_q(sandbox)}",
         "- id: system-prompt", "  config:",
+        # 模板变量只用 DSH 自己提供的（provider、model）。工作目录不写：DSH 新版每次都自己带上，也不再注册 {{cwd}}，
+        # 原来照它旧的默认在开头写的 "Your working directory is {{cwd}}." 让每次请求都失败（2026-10-19）
         f"    personaPrefix: {_q('You are Super Aide, a Windows desktop assistant powered by the {{model}} model.')}",
-        f"    personaSuffix: {_q('Your working directory is {{cwd}}.' + chr(10) * 2 + text)}",
+        f"    personaSuffix: {_q(text)}",
         "- id: session-log-deepseek", "  config:", "    enabled: false",
         "- id: plugin-package-inventory-deepseek", "  config:", "    enabled: false",
     ]

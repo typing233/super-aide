@@ -18,7 +18,7 @@ import uiautomation as auto
 import win32gui
 from uiautomation.uiautomation import _AutomationClient
 
-from . import chromium, uiawalk
+from . import chromium, filetext, uiawalk
 
 TREE_SCOPE_DESCENDANTS = 4  # uiautomation 库没有导出这个枚举
 MAX_SELECTED_CHARS = 20_000
@@ -95,7 +95,7 @@ def focus_and_selection(worker: UiaWorker) -> dict:
         if pattern:
             texts, rects = [], []
             for r in pattern.GetSelection() or []:
-                text = r.GetText(MAX_SELECTED_CHARS)
+                text = newlines(r.GetText(MAX_SELECTED_CHARS))
                 if text and text.strip():
                     texts.append(text)
                     rects += [(b.left, b.top, b.right, b.bottom) for b in r.GetBoundingRectangles()]
@@ -118,7 +118,14 @@ ROLE_NAMES = {50000: "按钮", 50002: "勾选框", 50003: "下拉框", 50004: "�
               50011: "菜单项", 50013: "单选", 50019: "标签页", 50020: "文字", 50024: "树节点", 50029: "数据项",
               50034: "表头", 50035: "表头项", 50037: "标题栏"}
 MAX_OUTLINE_LINES = 4000
+MULTILINE_VALUE = 40  # 比这长、又有换行的控件值按原样分行列出
 GROW_LINES = 60  # 框边上的行最多往外扩、往里收这么多行
+
+
+def newlines(text: str) -> str:
+    """统一成 \\n 分行：新版记事本这类 RichEdit 控件只用 \\r 分行，模型常把它当成没有换行
+    （实测"会议纪要\\r下午三点开会"被读成一行）。"""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _documents(worker: UiaWorker, hwnd: int) -> list:
@@ -150,7 +157,7 @@ def _document_texts(worker: UiaWorker, hwnd: int, deadline: float) -> list[str]:
         if not pattern:
             continue
         try:
-            text = pattern.DocumentRange.GetText(MAX_WINDOW_CHARS).replace("\ufffc", "").strip()
+            text = newlines(pattern.DocumentRange.GetText(MAX_WINDOW_CHARS)).replace("\ufffc", "").strip()
         except Exception:  # noqa: BLE001
             continue
         if not text or any(text in t for t in texts):
@@ -192,9 +199,14 @@ def _outline(worker: UiaWorker, hwnd: int, known: str, deadline: float) -> str:
         try:
             role = ROLE_NAMES.get(e.GetCachedPropertyValue(P_TYPE), "")
             name = " ".join(str(e.GetCachedPropertyValue(P_NAME) or "").split())
-            value = "" if e.GetCachedPropertyValue(P_PASSWORD) else " ".join(str(e.GetCachedPropertyValue(P_VALUE) or "").split())
+            raw = "" if e.GetCachedPropertyValue(P_PASSWORD) else newlines(str(e.GetCachedPropertyValue(P_VALUE) or "")).strip()
         except Exception:  # noqa: BLE001
             continue
+        value = " ".join(raw.split())
+        if len(value) > 3 and value in known:
+            value = ""  # 文档区已经整篇读出来了（新版记事本的编辑框的值就是整篇文字）：只留名字，不再重复一遍
+        elif "\n" in raw and len(raw) > MULTILINE_VALUE:
+            value = "\n" + raw  # 多行的值（老式的多行输入框）保留换行，压成一行就分不清哪是哪行了
         text = name if not value or value == name else f"{name} = {value}" if name else value
         if not text or text in seen or (len(text) > 3 and text in known):
             continue
@@ -213,14 +225,16 @@ def window_content(worker: UiaWorker, hwnd: int, budget_s: float = 3.0, wake: bo
     if wake and chromium.wake(hwnd):
         _wait_for_documents(worker, hwnd, min(deadline, time.perf_counter() + 1.5))
     docs = _document_texts(worker, hwnd, deadline)
+    # 界面层读不到文档内容（PowerPoint 的幻灯片就是这样）：标题里有 Office 文件名时直接读那个文件
+    opened = "" if docs else filetext.for_window(win32gui.GetWindowText(hwnd))
     outline = _outline(worker, hwnd, "\n".join(docs), deadline + 1.0) if time.perf_counter() < deadline + 1.0 else ""
-    parts = []
+    parts = [opened] if opened else []
     if docs:
         parts.append("【文档内容（完整，包括没显示出来的部分）】\n" + "\n\n".join(docs))
     if outline:
         parts.append("【界面上的其它文字和控件（包括滚动出去的）】\n" + outline)
     text = "\n\n".join(parts)
-    return text[:MAX_WINDOW_CHARS], "document" if docs else ("controls" if outline else "none")
+    return text[:MAX_WINDOW_CHARS], "document" if docs else "file" if opened else ("controls" if outline else "none")
 
 
 def _overlaps(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
@@ -327,7 +341,7 @@ def _corner_text(raw, rect: tuple[int, int, int, int]) -> str:
         return ""  # 框里没有文字（比如画布、图片）：交给 OCR
     a, b = _grow(a, -1, rect), _grow(b, 1, rect)
     a.MoveEndpointByRange(ENDPOINT_END, b, ENDPOINT_END)
-    return a.GetText(MAX_SELECTED_CHARS).replace("\ufffc", "").strip("\r\n")
+    return newlines(a.GetText(MAX_SELECTED_CHARS)).replace("\ufffc", "").strip("\n")
 
 
 def text_in_rect(worker: UiaWorker, hwnd: int, rect: tuple[int, int, int, int], budget_s: float = 2.0) -> str:
@@ -387,7 +401,7 @@ def window_text(worker: UiaWorker, hwnd: int, budget_s: float = 0.6) -> tuple[st
     if doc is not None:
         pattern = doc.GetPattern(auto.PatternId.TextPattern)
         if pattern:
-            text = pattern.DocumentRange.GetText(MAX_WINDOW_CHARS)
+            text = newlines(pattern.DocumentRange.GetText(MAX_WINDOW_CHARS))
             if text and text.strip():
                 return text, "document"
     deadline = time.perf_counter() + budget_s

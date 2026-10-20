@@ -5,6 +5,8 @@ import asyncio
 import sys
 from types import SimpleNamespace
 
+from super_aide.config import Config
+from super_aide.decision import Decider
 from super_aide import app
 from super_aide.engines import hub as hub_module
 from super_aide.engines.base import Event
@@ -81,6 +83,7 @@ class Hub:
     def __init__(self, engines):
         self.engines, self.router, self.conversations, self.gui = engines, Router(engines), {}, "ours"
         self.loop, self.events = asyncio.get_running_loop(), []
+        self.decider = Decider(Config())  # 没配置判断模型：照原来的做法
 
     def _emit(self, key, ev):
         self.events.append(ev)
@@ -90,6 +93,8 @@ class Hub:
 
     def _recall(self, conv, situation):
         return []
+
+    _understand = _recall
 
     def _vector(self, question, text):
         return None

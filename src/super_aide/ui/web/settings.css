@@ -594,6 +594,26 @@ textarea:focus { border-color: color-mix(in srgb, var(--a) 45%, transparent); }
 
 .suggest-foot { display: flex; justify-content: flex-end; }
 
+/* 判断模型：地址、密钥、模型，一行一个 */
+.fields { display: grid; gap: 8px; }
+
+.field {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+  outline: 0;
+  background: var(--control);
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  caret-color: var(--a);
+}
+
+.field::placeholder { color: var(--text-3); }
+.field:focus { border-color: color-mix(in srgb, var(--a) 45%, transparent); }
+
 /* 最近的改进：一条一行，点开看详情和改动 */
 .evolve-list { border-top: 1px solid var(--divider); padding: 4px 0; }
 .evolve-list[hidden] { display: none; }

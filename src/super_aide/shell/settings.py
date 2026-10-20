@@ -48,6 +48,7 @@ class SettingsBridge(WindowBridge):
     update_checked = Signal(dict)  # 后台线程查完更新 → 主线程交给网页
     data_moved = Signal(dict)  # 换数据位置：后台线程的进度（done/total）、出错（error）、搬完（finished）
     router_reported = Signal(dict)  # 路由表现：引擎线程算好 → 主线程交给网页
+    decision_tested = Signal(dict)  # 判断模型测完（联网，后台线程）→ 主线程交给网页
 
     def __init__(self, host: SettingsHost, window: WebWindow | None) -> None:
         super().__init__(window)
@@ -168,6 +169,13 @@ class SettingsBridge(WindowBridge):
         self.host.hub.router_report(self.router_reported.emit)
 
     @Slot()
+    def testDecision(self) -> None:  # noqa: N802
+        """判断模型的"测试"：问一道简单的题（联网，最多 10 秒），测完由 decision_tested 交回网页。"""
+        decider = self.host.hub.decider
+        threading.Thread(target=lambda: self.decision_tested.emit(decider.test()), name="decision-test",
+                         daemon=True).start()
+
+    @Slot()
     def openSetup(self) -> None:  # noqa: N802
         self.host.open_setup()
 
@@ -264,6 +272,7 @@ class SettingsWindow(WebWindow):
         bridge.update_checked.connect(self._update_checked)
         bridge.data_moved.connect(self._data_moved)
         bridge.router_reported.connect(self._router_reported)
+        bridge.decision_tested.connect(self._decision_tested)
         self.load_page(SETTINGS_PAGE, bridge)
 
     def _js(self, code: str) -> None:
@@ -299,6 +308,9 @@ class SettingsWindow(WebWindow):
 
     def _router_reported(self, result: dict) -> None:
         self._js(f"settings.routerReported({json.dumps(result, ensure_ascii=False)})")
+
+    def _decision_tested(self, result: dict) -> None:
+        self._js(f"settings.decisionTested({json.dumps(result, ensure_ascii=False)})")
 
     def _data_moved(self, result: dict) -> None:
         self._js(f"settings.dataMoved({json.dumps(result, ensure_ascii=False)})")

@@ -308,21 +308,99 @@ def dsh_auth(p: Places) -> tuple[bool, str, str]:
 
 
 def _yaml_keys(path: Path, section: str) -> set[str]:
-    """YAML 文件里某个顶层段落下一级的键名（两格缩进、冒号前面的部分）。只取名字，冒号后面的值直接丢掉。"""
+    """YAML 文件里某个顶层段落下一级的键名。只取名字，冒号后面的值直接丢掉。
+    块状的（下一层的缩进照文件里的来）和流式的（{A: x, B: y}，可以跨几行）都认。2026-10-19 实测 DSH 把 refs
+    写成了流式的："refs:" 下面一行 "{"、每个密钥一行、一行 "}"。原来只认两格缩进的块状写法，自定义服务的密钥
+    明明在，却当成没配好，DSH 每次启动都不参与路由。"""
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
         return set()
-    names, inside = set(), False
+    body: list[str] | None = None  # 这一段：头一行冒号后面的部分 + 下面的行
     for line in lines:
-        if not line.strip() or line.lstrip().startswith("#"):
+        top = line[:1] not in ("", " ", "\t", "#", "}", "]")  # 第 0 列开始的是下一段（流式写法收尾的括号不算）
+        if body is not None and top:
+            break
+        if body is not None:
+            body.append(line)
+        elif top and line.split(":", 1)[0].strip().strip("'\"") == section:
+            body = [line.split(":", 1)[1] if ":" in line else ""]
+    if body is None:
+        return set()
+    rows = [x for x in body[1:] if x.strip() and not x.lstrip().startswith("#")]
+    head = body[0].strip()
+    first = head if head and not head.startswith("#") else rows[0].strip() if rows else ""
+    if first.startswith("{"):
+        return _flow_keys("\n".join(body))
+    depth = len(rows[0]) - len(rows[0].lstrip()) if rows else 0
+    return {x.split(":", 1)[0].strip().strip("'\"") for x in rows if len(x) - len(x.lstrip()) == depth and ":" in x}
+
+
+def _flow_keys(text: str) -> set[str]:
+    """流式写法的映射（{A: x, "B": {...}}，可以跨几行）最外层的键名。值不看：引号、括号里的整段跳过。"""
+    names: set[str] = set()
+    depth, i = 0, 0
+    key: list[str] | None = None  # 最外层正在读的键；None = 正在读值
+    fresh = quoted = False  # fresh：这里能开始一个新的值（引号在开头才算引号）；quoted：前一个是带引号的值
+    while i < len(text):
+        c, after = text[i], text[i + 1:i + 2]
+        if c == "#" and (i == 0 or text[i - 1].isspace()):  # 注释：到行尾
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
             continue
-        if not line.startswith(" "):
-            inside = line.split(":", 1)[0].strip() == section
+        if c in "\"'" and fresh:
+            end = _quote_end(text, i)
+            if depth == 1 and key is not None:
+                key.append(text[i + 1:end])
+            i, fresh, quoted = end + 1, False, True
             continue
-        if inside and line.startswith("  ") and not line.startswith("   ") and ":" in line:
-            names.add(line.split(":", 1)[0].strip().strip("'\""))
+        if c.isspace():
+            if depth == 1 and key:
+                key.append(c)
+            i += 1
+            continue
+        was_quoted, fresh, quoted = quoted, False, False
+        if c in "{[":
+            depth, fresh = depth + 1, True
+            if depth == 1:
+                key = [] if c == "{" else None
+        elif c in "}]":
+            if depth == 1:
+                if key:
+                    names.add("".join(key).strip())  # 只有键没有值：{A, B}
+                break
+            depth -= 1
+        elif c == ",":
+            fresh = True
+            if depth == 1:
+                if key:
+                    names.add("".join(key).strip())
+                key = []
+        elif c == ":" and (was_quoted or not after or after.isspace() or after in ",[]{}"):
+            fresh = True
+            if depth == 1 and key is not None:
+                names.add("".join(key).strip())
+                key = None
+        elif depth == 1 and key is not None:
+            key.append(c)
+        i += 1
+    names.discard("")
     return names
+
+
+def _quote_end(text: str, start: int) -> int:
+    """start 处的引号配对的那个引号在哪（双引号里 \\ 转义，单引号里 '' 是一个引号）；没配上就是末尾。"""
+    quote, i = text[start], start + 1
+    while i < len(text):
+        if quote == '"' and text[i] == "\\":
+            i += 2
+        elif text[i] == quote and quote == "'" and text[i + 1:i + 2] == "'":
+            i += 2
+        elif text[i] == quote:
+            return i
+        else:
+            i += 1
+    return len(text)
 
 
 def _env_file_keys(path: Path) -> set[str]:

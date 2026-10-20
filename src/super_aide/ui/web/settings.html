@@ -70,6 +70,24 @@
             <button class="switch" id="shadow-eval" role="switch" aria-label="后台对比" data-i18n-aria-label="后台对比"></button>
           </div>
         </div>
+        <!-- 判断模型（可选，decision/）：没配也照常用，配了判断得更准 -->
+        <div class="tile gap">
+          <div class="row">
+            <div class="label"><span data-i18n>判断模型</span><small id="decision-note"></small></div>
+            <button class="text-btn" id="decision-toggle"></button>
+          </div>
+          <div class="row stacked" id="decision-form" hidden>
+            <div class="fields">
+              <input class="field" id="decision-url" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="地址，例如 https://example.com/v1/systemone" data-i18n-placeholder="地址，例如 https://example.com/v1/systemone">
+              <input class="field" id="decision-key" type="password" autocomplete="off" spellcheck="false"
+                     placeholder="密钥" data-i18n-placeholder="密钥">
+              <input class="field" id="decision-model" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="模型，例如 deepseek-flash-jev" data-i18n-placeholder="模型，例如 deepseek-flash-jev">
+            </div>
+            <div class="suggest-foot"><button class="text-btn accent" id="decision-test" data-i18n>测试</button></div>
+          </div>
+        </div>
 
         <!-- 路由表现：越用越省的同时，质量有没有变差（router/report.py） -->
         <div id="router-report" hidden>

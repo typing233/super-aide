@@ -111,7 +111,8 @@ def _recall_hooks(slot: SessionSlot) -> dict:
             return {}
         raw = input_data.get("error") if event == "PostToolUseFailure" else input_data.get("tool_response")
         lines = experience.error_lines(experience.text_of(raw))
-        note = slot.remember(lines) if lines else ""
+        # 想起经验可能要问一次判断模型（联网，最多一两秒）：放到线程里，不卡住其它对话
+        note = await asyncio.get_running_loop().run_in_executor(None, slot.remember, lines) if lines else ""
         return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": note}} if note else {}
 
     return {"PostToolUse": [HookMatcher(matcher=None, hooks=[after])],

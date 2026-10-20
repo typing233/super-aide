@@ -23,6 +23,9 @@ EN = {
     "{app}历史记录": "{app} history",
     "{app}设置": "{app} settings",
     "没能设置开机自启：{error}": "Couldn't change autostart: {error}",
+    # 设置里的判断模型（decision/client.py）
+    "没填地址或模型": "URL or model is empty",
+    "返回的格式不对：不像 Jev 类判断模型": "Unexpected response: this doesn't look like a Jev-style decision model",
     "设置有误：{error}": "Invalid settings: {error}",
     "已按 Esc 停止": "Stopped with Esc",
 

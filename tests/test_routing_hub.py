@@ -3,6 +3,8 @@
 import asyncio
 from types import SimpleNamespace
 
+from super_aide.config import Config
+from super_aide.decision import Decider
 from super_aide.engines import hub as hub_module
 from super_aide.engines.base import Event
 from super_aide.engines.hub import Conversation, EngineHub
@@ -41,6 +43,7 @@ class FakeRouter:
 def fake_hub(router=None, engines=None, **extra) -> SimpleNamespace:
     events = []
     hub = SimpleNamespace(router=router or FakeRouter(), engines=engines or {}, conversations={}, _last={},
+                          decider=Decider(Config()),
                           events=events, _emit=lambda key, ev: events.append(ev), **extra)
     hub._emit_route = lambda c, d: EngineHub._emit_route(hub, c, d)
     return hub
@@ -262,3 +265,34 @@ def test_screen_tools_mark_the_conversation():
 
     assert computer.looks_at_screen("mcp__computer__point") and computer.looks_at_screen("mcp__computer__observe_window")
     assert not computer.looks_at_screen("Read") and not computer.looks_at_screen("mcp__memory__recall")
+
+
+def test_older_conversations_release_their_engine_sessions():
+    """新开对话后，之前的对话再也接着问不了：关掉它们的引擎会话；还在做的等这一轮做完再关。"""
+    async def run():
+        closed = []
+
+        class Session:
+            def __init__(self, name):
+                self.name = name
+
+            async def close(self):
+                closed.append(self.name)
+
+        hub = fake_hub()
+        hub.loop = asyncio.get_running_loop()
+        hub._drop_sessions = lambda c: EngineHub._drop_sessions(hub, c)
+        old, busy, new = conv(), conv(), conv()
+        old.session, busy.session, new.session = Session("old"), Session("busy"), Session("new")
+        busy.busy = True
+        hub.conversations = {"a": old, "b": busy, "c": new}
+        EngineHub._retire(hub, "c")
+        await asyncio.sleep(0)
+        assert closed == ["old"] and old.session is None and busy.retired and not new.retired
+        busy.busy = False  # 那一轮做完了（_first_turn / _followup 的 finally）
+        if busy.retired:
+            hub._drop_sessions(busy)
+        await asyncio.sleep(0)
+        return closed
+
+    assert asyncio.run(run()) == ["old", "busy"]

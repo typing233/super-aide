@@ -102,6 +102,17 @@ window.I18N_EN = {
   '收起': 'Show less',
   '手动添加模型名，回车确认': 'Add a model by name, then press Enter',
   '至少要打开一个模型，不然没法回答问题。': 'Turn on at least one model, or questions can\'t be answered.',
+  '判断模型': 'Decision model',
+  '可选。用 Jev 类模型判断任务难度、追问是不是在说没答好、经验对不对得上，比关键词准，一次不到 1 秒；不配也照常用':
+    'Optional. A Jev-style model judges task difficulty, whether a follow-up says the last answer was wrong, and '
+    + 'whether a past lesson really applies. More accurate than keywords, under a second each; works fine without it.',
+  '{model} · 已启用': '{model} · on',
+  '正在测试…': 'Testing…',
+  '没连上：{error}': 'Couldn\'t connect: {error}',
+  '能用，一次 {ms} 毫秒': 'Working, {ms} ms per call',
+  '地址，例如 https://example.com/v1/systemone': 'URL, e.g. https://example.com/v1/systemone',
+  '模型，例如 deepseek-flash-jev': 'Model, e.g. deepseek-flash-jev',
+  '测试': 'Test',
   '后台对比': 'Background comparison',
   '问答答完后，用更快、更省的配置在后台把同一个问题再答一遍，由强模型对比；你看到的始终是当前最可靠的那份。会多花一点费用':
     'After an answer, the same question is answered again in the background with a faster, cheaper setup, and a '
