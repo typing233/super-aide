@@ -126,6 +126,21 @@ def test_credential_names_only_reads_record_names(tmp_path):
     assert detect._yaml_keys(path, "refs") == {"DEEPSEEK_API_KEY"}
 
 
+def test_credential_names_in_flow_style(tmp_path):
+    """DSH 也会把一段写成流式的（2026-10-19 实测 refs 是这样：下面一行 "{"、每个密钥一行、一行 "}"）：
+    键名照样认得出，值里的逗号、括号、引号不会把它弄乱；块状的下一层缩进几格都行。"""
+    path = write(tmp_path / "c.yaml", "version: 1\nrefs:\n  {\n    A_KEY: sk-a,\n    B_KEY: sk-b\n  }\n"
+                 "records: {a/b: {kind: grant, payload: {token: \"x,}\"}}, 'c/d': {kind: grant}}\n"
+                 "other: {e/f: 1}\n")
+    assert detect._yaml_keys(path, "refs") == {"A_KEY", "B_KEY"}
+    assert detect._yaml_keys(path, "records") == {"a/b", "c/d"}
+    path = write(tmp_path / "d.yaml", "refs: {\n  A_KEY: x, # 注释\n  'B_KEY': \"y\"\n}\nrecords: {}\n"
+                 "other:\n    C_KEY: z\n    D_KEY:\n      e: 1\n")
+    assert detect._yaml_keys(path, "refs") == {"A_KEY", "B_KEY"}
+    assert detect._yaml_keys(path, "records") == set()
+    assert detect._yaml_keys(path, "other") == {"C_KEY", "D_KEY"}
+
+
 def test_dsh_api_key_sources(places):
     assert detect.dsh_auth(with_env(places, DEEPSEEK_API_KEY="k"))[:2] == (True, "apikey")
     write(places.home / ".dsh" / ".env", "# 注释\nDEEPSEEK_API_KEY=sk-x\n")

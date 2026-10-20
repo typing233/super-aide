@@ -56,6 +56,10 @@ EN = {
     "这个对话已经结束，请重新提问。": "This conversation has ended. Please ask again.",
     "引擎没给出结果就断开了": "The engine disconnected without a result",
     "没有可用的模型": "No model is available",
+    # 路由一个能选的引擎都没有（router/policy.py）
+    "{engines} 还没准备好：请在设置 → 通用 → 环境检查里看看缺什么":
+        "Not ready yet: {engines}. See what's missing in Settings → General → Setup check",
+    "没有可用的引擎：请在设置里至少启用一个模型": "No engine is available: turn on at least one model in Settings",
     "{engine}：{error}": "{engine}: {error}",  # 设置里刷新模型列表时的报错
 
     # 引擎出错
