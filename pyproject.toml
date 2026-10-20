@@ -1,6 +1,6 @@
 [project]
 name = "super-aide"
-version = "0.5.1"
+version = "0.5.2"
 description = "超级助手（Super Aide）：Windows 桌面助手，按快捷键召唤，看着屏幕回答问题或直接动手；调度 Claude Code / Codex"
 readme = "README.md"
 license = "MIT"
