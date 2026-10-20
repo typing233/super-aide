@@ -218,12 +218,12 @@ Super Aide 直接用 Claude Code、Codex 自己的模型配置（`~/.claude`、`
 
 - **能不能开始**：至少一个引擎能用（配好了模型）才能点"开始使用"。没配的那个显示"未配置模型"，以后再配也行；第一次准备走完以后，只有一个能用的都没有时才会再自动打开。
 - **"装了"怎么算**：命令行（PATH、`~/.local/bin`、npm 全局目录、WinGet）、Codex 桌面版（微软商店）、VS Code 插件都算。两个 SDK 自带 CLI，引擎本身不靠全局命令；没装全局命令时用 SDK 自带的 CLI 登录，登录结果共用。
-- **"配了"怎么算**（只看有没有，不读出、不记录密钥）：Claude Code 看 `settings.json` 的 env、用户环境变量、`.credentials.json` 里的账号登录、第三方云开关；Codex 看 `auth.json` 的账号或 Key、`config.toml` 里选的服务商和它写着的密钥（`experimental_bearer_token`）或 `env_key` 对应的环境变量；DSH 看凭据文件里有没有 DeepSeek 账号那条记录的名字、`DEEPSEEK_API_KEY`。
+- **"配了"怎么算**（只看有没有，不读出、不记录密钥）：Claude Code 看 `settings.json` 的 env、用户环境变量、`.credentials.json` 里的账号登录、第三方云开关；Codex 看 `auth.json` 的账号或 Key、`config.toml` 里选的服务商和它写着的密钥（`experimental_bearer_token`）或 `env_key` 对应的环境变量；DSH 默认用的是自定义的服务时，看它的密钥名字（`apiKeyEnv`）在不在环境变量、凭据文件的 `refs` 或 `~/.dsh/.env` 里，否则看凭据文件里有没有 DeepSeek 账号那条记录的名字、`DEEPSEEK_API_KEY`。凭据文件只按名字找，块状和流式（`{A: x, B: y}`，可以跨几行）两种写法都认（2026-10-19：DSH 把 `refs` 写成了流式的，原来认不出，DSH 每次启动都被当成没配好、不参与路由）。
 - **自定义服务地址写到哪**：都写进工具自己的配置，改前各留一份 `*.super-aide.bak`，只改这几项，别的设置和注释原样保留：Claude Code 写 `settings.json` 的 env（有地址用 `ANTHROPIC_AUTH_TOKEN`，官方 API 用 `ANTHROPIC_API_KEY`）；Codex 在 `config.toml` 加服务商 `model_providers.super_aide`（`wire_api = "responses"`），密钥写在服务商里（`experimental_bearer_token`）；DSH 的 API Key 放 `DEEPSEEK_API_KEY`。
   - 0.3.1 以前 Codex 的密钥放在用户环境变量 `SUPER_AIDE_CODEX_API_KEY`：已经开着的 Codex 桌面版、VS Code 插件（和它们起的 codex 进程）读不到新设的环境变量，换了服务商就报 "Missing environment variable"，要重开程序才行。现在写进配置，保存时顺手删掉那个环境变量。
 - **测试连接**：先列模型；列不出来（不少中转服务不支持 `/models`）或者你填的模型不在里面，就用你填的模型按工具自己的接口真发一个很小的请求（Codex 走 Responses、流式，读到第一个看得出成败的事件就停；Claude 走 Messages）。Codex 列不出模型时必须填模型：Codex 原来的默认模型多半是上一个服务商的，换过来就用不了。连接刚连上就被掐断（中转服务偶尔 SSL 握手时断开）的再试一次。保存的结果留在那一行下面（原来 1.4 秒就跟着表单一起消失，"没法提前确认密钥"常被看成没保存）。
 - **刚配好的服务用它确实提供的模型**：填了模型就只打开它；没填的，等发现模型时把服务不提供的关掉，一个不剩就打开它提供的最强的那个。Codex 自己的默认模型（`config.toml` 顶上的 `model`）新服务列出来的模型里没有的，换成它提供的最强的那个。
-- 没配好的引擎不参与路由（`EngineRouter.set_ready`），不会每次都去试一个注定打不开的引擎。
+- 没配好的引擎不参与路由（`EngineRouter.set_ready`），不会每次都去试一个注定打不开的引擎。因此一个能选的都没有时，设置里开着模型、却没通过检查的引擎，提示"去环境检查里看看缺什么"，而不是"请在设置里至少启用一个模型"。
 - 安装脚本 `scripts/install.ps1`（双击 `install.cmd`）：准备 uv（官方脚本 → 从 PyPI 镜像取 uv 的 wheel）、Python 3.12 和依赖（按 `uv.lock` 锁定版本；官方源 → 阿里云 → 清华，Python 本体用 npmmirror），建开始菜单快捷方式后启动，第一次启动就进准备窗口。
 
 ### 3.8 安装器和更新（2026-10-09）

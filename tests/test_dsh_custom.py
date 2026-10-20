@@ -13,8 +13,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from super_aide.config import EngineSettings, ModelEntry
+from super_aide import paths
+from super_aide.config import Config, EngineSettings, ModelEntry
 from super_aide.engines import dsh
+from super_aide.router import EngineRouter, Task
 from super_aide.setup import configure, detect, dshconf, flow
 
 #: 照着 2026-10-14 你机器上 DSH 桌面版的模型设置（地址换掉了）
@@ -182,6 +184,36 @@ def test_custom_route_counts_as_configured_once_its_key_exists(tmp_path, monkeyp
     (detect.dsh_dir(p) / ".credentials.yaml").write_text("refs:\n  SELF_API_KEY: x\n", encoding="utf-8")
     assert detect.dsh_auth(p) == (True, "custom", "自定义服务地址 gw.example.cn")
     assert dsh.route(p).provider == "self"
+
+
+#: DSH 记密钥的 refs 写成了流式的（2026-10-19 实测：上一行 "refs:"，下面一行 "{"、每个密钥一行、一行 "}"）
+FLOW_REFS = ("version: 1\nrecords:\n  deepseek-account-platform/device:\n    kind: device\n    payload:\n"
+             "      id: dev-1\nrefs:\n  {\n    OTHER_API_KEY: sk-other,\n    SELF_API_KEY: sk-test-0\n  }\n")
+
+
+def test_key_in_flow_style_refs_counts(tmp_path, monkeypatch):
+    p = places(tmp_path, monkeypatch)
+    desktop(detect.dsh_dir(p))
+    (detect.dsh_dir(p) / ".credentials.yaml").write_text(FLOW_REFS, encoding="utf-8")
+    assert detect.dsh_auth(p) == (True, "custom", "自定义服务地址 gw.example.cn")
+
+
+def test_only_dsh_switched_on_still_gets_the_question(tmp_path, monkeypatch):
+    """2026-10-19 那次：设置里 Claude、Codex 都关了，只开着 DSH，DSH 的密钥在流式的 refs 里。原来启动时的检查
+    认不出这个密钥，DSH 不参与路由，路由一个引擎都没有，首问报"没有可用的引擎：请在设置里至少启用一个模型"。"""
+    monkeypatch.setattr(paths, "ROUTER", tmp_path / "router")
+    p = places(tmp_path, monkeypatch, ANTHROPIC_API_KEY="k", OPENAI_API_KEY="k")
+    (tmp_path / "npm").mkdir()
+    (tmp_path / "npm" / "dsh.cmd").write_text("@echo off\n", encoding="utf-8")
+    desktop(detect.dsh_dir(p))
+    (detect.dsh_dir(p) / ".credentials.yaml").write_text(FLOW_REFS, encoding="utf-8")
+    report = detect.scan(p)
+    cfg = Config(claude=EngineSettings(enabled=False, models=[ModelEntry("claude-opus-5-5", True)]),
+                 codex=EngineSettings(enabled=False, models=[ModelEntry("gpt-6-astra", True)]),
+                 dsh=EngineSettings(enabled=True, models=[ModelEntry("deepseek-flash", True)]))
+    router = EngineRouter(cfg, gui_official=False)
+    router.set_ready(report.usable(cfg.dsh.enabled))  # 和启动时一样（app.SuperAide）
+    assert router.decide(Task("ask", "翻译并解释", "foreign", "Code.exe")).engine == "dsh"
 
 
 # ---------- 测试连接：认出是哪种接口 ----------

@@ -146,3 +146,18 @@ def test_no_engine_raises():
     cfg = Config(claude=EngineSettings(enabled=False), codex=EngineSettings(enabled=False))
     with pytest.raises(RuntimeError):
         EngineRouter(cfg, gui_official=False).decide(Task("ask", "这是什么？", "text"))
+
+
+def test_no_engine_says_where_to_fix_it():
+    """开着模型的引擎没通过环境检查：叫你去环境检查里看。原来一律说"请在设置里至少启用一个模型"，
+    可 DSH 的模型明明开着（2026-10-19）。"""
+    cfg = Config(claude=EngineSettings(enabled=False), codex=EngineSettings(enabled=False),
+                 dsh=EngineSettings(enabled=True, models=[ModelEntry("deepseek-flash", True)]))
+    r = EngineRouter(cfg, gui_official=False)
+    r.set_ready(["claude", "codex"])
+    with pytest.raises(RuntimeError, match="^DeepSeek Harness 还没准备好：请在设置 → 通用 → 环境检查里看看缺什么$"):
+        r.decide(Task("ask", "翻译并解释", "foreign", "Code.exe"))
+    cfg.dsh.enabled = False
+    r.rebuild()
+    with pytest.raises(RuntimeError, match="^没有可用的引擎：请在设置里至少启用一个模型$"):
+        r.decide(Task("ask", "翻译并解释", "foreign", "Code.exe"))

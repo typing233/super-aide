@@ -34,6 +34,8 @@ from typing import Any, Callable
 
 from .. import paths
 from ..config import EFFORTS, ENGINES, Config
+from ..i18n import tr
+from ..setup import detect
 from . import catalog
 from .catalog import Profile
 from .evidence import Evidence, Outcome
@@ -343,6 +345,15 @@ class EngineRouter:
         return [e for e in ENGINES if self.usable(e) and now - self.unavailable.get(e, 0) > UNAVAILABLE_S
                 and (self.ready is None or e in self.ready)]
 
+    def _none_available(self) -> str:
+        """一个能选的引擎都没有时，说清该去哪儿修。设置里开着模型、环境检查却没过（没装、没配好模型服务）的引擎，
+        要去环境检查里看；原来一律说"请在设置里至少启用一个模型"，可模型明明开着（2026-10-19）。"""
+        waiting = [detect.NAMES[e] for e in ENGINES
+                   if self.profiles.get(e) and self.ready is not None and e not in self.ready]
+        if waiting:
+            return tr("{engines} 还没准备好：请在设置 → 通用 → 环境检查里看看缺什么", engines=tr("、").join(waiting))
+        return tr("没有可用的引擎：请在设置里至少启用一个模型")
+
     def best_model(self, engine: str) -> str:
         """这个引擎能选的模型里最强的一个（转交、后台小活用）。"""
         found = self.usable(engine)
@@ -448,7 +459,7 @@ class EngineRouter:
         if pinned:
             engines = [pinned]
         if not engines:
-            raise RuntimeError("没有可用的引擎：请在设置里至少启用一个模型")
+            raise RuntimeError(self._none_available())
         task.id = task.id or uuid.uuid4().hex[:12]
         view = self.describe(task)
         try:
