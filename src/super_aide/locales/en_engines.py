@@ -7,6 +7,7 @@ EN = {
     "正在按 {keys}": "Pressing {keys}",
     "正在选择「{target}」": "Selecting “{target}”",
     "正在等「{target}」出现": "Waiting for “{target}” to appear",
+    "正在等「{target}」消失": "Waiting for “{target}” to go away",
     "正在点击": "Clicking",
     "正在双击": "Double-clicking",
     "正在右键点击": "Right-clicking",

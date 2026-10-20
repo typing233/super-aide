@@ -20,6 +20,7 @@ import uiautomation as auto
 from pydantic import BaseModel, Field
 
 from ..snapshot import win32
+from ..snapshot.uia import newlines
 from . import browser, elements, inputs
 from .elements import Element
 from .guard import GUARD
@@ -27,6 +28,9 @@ from .observe import Observation
 from .signals import STOP as STOP_EVENT
 
 PATTERN_TIMEOUT = 3.0  # 有的老控件 Invoke 会一直等到它弹出的对话框关掉才返回
+WAIT_MAX_S = 30       # wait 一次最多等这么久（等久了按 Esc 停不下来的感觉很差；要多等就多调几次）
+WAIT_FOR_MAX_S = 60   # wait_for 一次最多等这么久
+HIDDEN_INPUT_PX = 4   # 宽或高小于这么多像素的输入框是藏起来收键盘输入的（读回来的值核对不了）
 SYNCHRONIZE, WAIT_OBJECT_0 = 0x00100000, 0
 CLICK_INVOKE = {"Button", "SplitButton", "MenuItem", "Link", "Image", "HeaderItem"}
 CLICK_SELECT = {"Radio", "ListItem", "TabItem", "TreeItem", "DataItem"}
@@ -47,20 +51,21 @@ class Action(BaseModel):
     """一个动作。目标用控件编号 id（优先），或截图上的坐标 x、y。"""
 
     do: Literal["click", "double_click", "right_click", "hover", "type", "key", "scroll", "drag",
-                "select", "toggle", "focus", "wait", "wait_for"]
+                "select", "toggle", "focus", "wait", "wait_for", "wait_gone"]
     id: int | None = Field(None, description="observe 列表里的控件编号")
     x: int | None = Field(None, description="截图上的横坐标（没有编号时用）")
     y: int | None = Field(None, description="截图上的纵坐标")
     to_id: int | None = Field(None, description="drag 的终点控件")
     to_x: int | None = Field(None, description="drag 的终点横坐标")
     to_y: int | None = Field(None, description="drag 的终点纵坐标")
-    text: str | None = Field(None, description="type 要输入的文字；select 的选项名；wait_for 要等出现的文字")
+    text: str | None = Field(None, description="type 要输入的文字；select 的选项名；wait_for 要等出现的文字；"
+                                               "wait_gone 要等消失的文字")
     keys: str | None = Field(None, description="key 的组合键，如 ctrl+s；多个用逗号隔开，依次按")
     replace: bool = Field(False, description="type 之前先清空原有内容")
     enter: bool = Field(False, description="type 之后按回车")
     amount: int = Field(3, description="scroll 的格数：正数向下、负数向上")
     on: bool | None = Field(None, description="toggle 的目标状态，不填就是切换")
-    seconds: float = Field(1.0, description="wait 等多久；wait_for 最多等多久")
+    seconds: float = Field(1.0, description="wait 等多久（一次最多 30 秒）；wait_for、wait_gone 最多等多久（一次最多 60 秒）")
     window: str | None = Field(None, description="focus 的窗口：标题或进程名的一部分")
     method: Literal["auto", "uia", "mouse"] = Field("auto", description="auto：能直接操作控件就直接操作；mouse：用真实鼠标键盘")
 
@@ -186,7 +191,7 @@ class Runner:
         try:
             for i, a in enumerate(actions, 1):
                 _check_stop()
-                if a.do in ("wait", "wait_for"):
+                if a.do in ("wait", "wait_for", "wait_gone"):
                     GUARD.release(keep, self.s.hwnd)  # 等待的时候不挡用户
                 if self.s.hwnd:
                     self.s.check_window(self.s.hwnd)
@@ -318,10 +323,15 @@ class Runner:
         how = inputs.enter_text(a.text, should_stop=stop_requested)
         note = ""
         if el is not None and "value" in el.patterns and "password" not in el.states:
-            want = a.text if a.replace else before + a.text
-            now = _settled_value(el, want)
-            if now != want and not (not a.replace and now.endswith(a.text)):
-                note = f"；注意：输入后框里是「{now[:60]}」，和预期不一致，可能没输进去"
+            if _hidden_input(el):
+                # 网页终端、代码编辑器收字用的隐藏输入框，打完会自己清空：读回来的对不上不说明没输进去
+                # （实测网页终端里连着 10 次报"可能没输进去"，命令其实都执行了）
+                note = "；这是网页终端、编辑器的隐藏输入框，打完会自己清空，没法从框里核对：要确认就看屏幕上的结果"
+            else:
+                want = a.text if a.replace else before + a.text
+                now = _settled_value(el, want)
+                if now != want and not (not a.replace and now.endswith(a.text)):
+                    note = f"；注意：输入后框里是「{now[:60]}」，和预期不一致，可能没输进去"
         if a.enter:
             inputs.press("enter")
         return f"{'在 ' + _label(el) + ' ' if el else ''}输入 {len(a.text)} 个字（{how}）{note}"
@@ -428,16 +438,22 @@ class Runner:
         return f"切到窗口「{win32gui_title(hwnd)}」（之后的编号和坐标请重新 observe）"
 
     def _wait(self, a: Action) -> str:
-        end = time.time() + min(max(a.seconds, 0), 30)
+        asked = max(a.seconds, 0)
+        end = time.time() + min(asked, WAIT_MAX_S)
         while time.time() < end:
             _check_stop()
             time.sleep(0.1)
-        return f"等了 {a.seconds:g} 秒"
+        if asked > WAIT_MAX_S:
+            # 照实说只等了多久（原来说"等了 300 秒"，其实只等了 30 秒，模型以为等够了：实测下载模型时这样误判过）
+            return (f"只等了 {WAIT_MAX_S} 秒（一次最多等 {WAIT_MAX_S} 秒，要的 {asked:g} 秒没等完）："
+                    "还要等就再调一次，或者用 wait_for 等某个文字出现")
+        return f"等了 {asked:g} 秒"
 
     def _wait_for(self, a: Action) -> str:
         if not a.text or not self.s.hwnd:
             raise RuntimeError("wait_for 需要 text，并且要先 observe 一个窗口")
-        end = time.time() + min(max(a.seconds, 1), 60)
+        limit = min(max(a.seconds, 1), WAIT_FOR_MAX_S)
+        end = time.time() + limit
         tries = 0
         while time.time() < end:
             _check_stop()
@@ -447,7 +463,26 @@ class Runner:
             if tries % 3 == 0 and _seen_on_screen(self.s.hwnd, a.text):  # 界面没交出控件的地方：认图看看
                 return f"「{a.text}」出现了（认图）"
             time.sleep(0.5)
-        raise RuntimeError(f"等了 {a.seconds:g} 秒，「{a.text}」没有出现")
+        raise RuntimeError(f"等了 {limit:g} 秒，「{a.text}」没有出现"
+                           + (f"（一次最多等 {WAIT_FOR_MAX_S} 秒，还要等就再调一次）" if a.seconds > WAIT_FOR_MAX_S else ""))
+
+    def _wait_gone(self, a: Action) -> str:
+        """等某个文字消失：做完了的标志常常是"正在下载""运行中"、Jupyter 的"中断"按钮没了，
+        而不是出现什么新字（命令行的提示符一直都在，wait_for 会马上返回）。"""
+        if not a.text or not self.s.hwnd:
+            raise RuntimeError("wait_gone 需要 text，并且要先 observe 一个窗口")
+        limit = min(max(a.seconds, 1), WAIT_FOR_MAX_S)
+        start, first = time.time(), True
+        while time.time() - start < limit:
+            _check_stop()
+            # 控件里找不到了，再认一次图确认（界面没交出控件的地方，字还在图上就不算消失）
+            if not elements.search(self.s.hwnd, a.text, limit=1) and not _seen_on_screen(self.s.hwnd, a.text):
+                return (f"「{a.text}」现在就没有（不用等；要等的字写对了吗）" if first
+                        else f"「{a.text}」不见了（等了 {time.time() - start:.0f} 秒）")
+            first = False
+            time.sleep(0.5)
+        raise RuntimeError(f"等了 {limit:g} 秒，「{a.text}」还在"
+                           + (f"（一次最多等 {WAIT_FOR_MAX_S} 秒，还要等就再调一次）" if a.seconds > WAIT_FOR_MAX_S else ""))
 
 
 def _seen_on_screen(hwnd: int, text: str) -> bool:
@@ -475,10 +510,16 @@ def _has_edit_child(el: Element) -> bool:
 
 
 def _current_value(el: Element) -> str:
-    try:
-        return str(el.raw.GetCurrentPropertyValue(elements.P_VALUE) or "").replace("\r\n", "\n")
+    try:  # 新版记事本这类 RichEdit 只用 \r 分行：统一成 \n 再和要输入的比
+        return newlines(str(el.raw.GetCurrentPropertyValue(elements.P_VALUE) or ""))
     except Exception:  # noqa: BLE001
         return ""
+
+
+def _hidden_input(el: Element) -> bool:
+    """几乎没有大小的输入框：网页终端（xterm.js）、代码编辑器（Monaco）把它藏起来专门收键盘输入，收完就清空。"""
+    left, top, right, bottom = el.rect
+    return right - left < HIDDEN_INPUT_PX or bottom - top < HIDDEN_INPUT_PX
 
 
 def _settled_value(el: Element, want: str, timeout: float = 0.6) -> str:

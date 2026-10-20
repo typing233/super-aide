@@ -96,6 +96,8 @@ def status(tool: str, args: dict | None) -> str:
             text = tr("正在选择「{target}」", target=first.get("text", ""))
         elif do == "wait_for":
             text = tr("正在等「{target}」出现", target=first.get("text", ""))
+        elif do == "wait_gone":
+            text = tr("正在等「{target}」消失", target=first.get("text", ""))
         else:
             text = tr(ACT_VERBS.get(do, "正在操作界面"))
         return f"{text}…" if len(actions) <= 1 else tr("{action}（共 {count} 步）…", action=text, count=len(actions))

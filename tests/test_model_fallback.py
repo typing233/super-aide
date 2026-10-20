@@ -13,6 +13,7 @@ import pytest
 
 from super_aide import paths
 from super_aide.config import Config, EngineSettings, ModelEntry
+from super_aide.decision import Decider
 from super_aide.engines import hub as hub_module
 from super_aide.engines.base import MODEL_UNAVAILABLE, Event, friendly_text
 from super_aide.engines.hub import Conversation, EngineHub, failure_kind
@@ -154,12 +155,15 @@ class Hub:
     def __init__(self, router, engines):
         self.router, self.engines, self.conversations, self.gui = router, engines, {}, "ours"
         self.loop, self.events = asyncio.get_running_loop(), []
+        self.decider = Decider(Config())  # 没配置判断模型：照原来的做法
 
     def _emit(self, key, ev):
         self.events.append(ev)
 
     def _recall(self, conv, situation):
         return []
+
+    _understand = _recall
 
     def _vector(self, question, text):
         return None

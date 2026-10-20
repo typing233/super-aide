@@ -44,9 +44,6 @@ PARKED_FRAME_MS = 100  # 网页把收起后的空白画到窗口上，留足这�
 RECENT_S = 600        # 10 分钟内可以 Ctrl+Enter 接着上次问
 PILL_GUESS = QSize(300, 40)  # 操作胶囊大概多大（网页报上来之前）
 CLIPBOARD_LIMIT = 2000
-NEGATIVE_FOLLOWUP = re.compile(r"不对|错了|没用|不行|没解决|还是不|不是这样|没有用|不管用|失败了"
-                               r"|\b(wrong|incorrect|not working|doesn'?t work|didn'?t work|still (not|broken|fail)|no luck)\b",
-                               re.IGNORECASE)
 #: Markdown 的编号列表项。回答规范里编号列表只用来写"照着做"的步骤
 STEP_ITEM = re.compile(r"^ {0,3}\d{1,2}[.)] +\S", re.M)
 
@@ -375,8 +372,7 @@ class Controller(QObject):
 
     def _ask_more(self, text: str, mode: str, snap: Snapshot) -> None:
         self.on_use()
-        if mode == self.conv_mode and NEGATIVE_FOLLOWUP.search(text):
-            self.hub.feedback(self.conv_key, False, "negative_followup")  # "不对""没用"：上一轮没答好
+        # 追问里说"不对""还是不行"（上一轮没答好）由中枢判断（hub._followup：有判断模型时用它，没有就按关键词）
         if mode != self.conv_mode:
             # 问答 → 操作（Tab「照这个帮我做」）：新开一个操作对话，带上刚才的问答
             if self.conv_mode == "ask":

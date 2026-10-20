@@ -126,3 +126,50 @@ def test_guide_labels_stay_on_screen_at_the_edges():
     assert corner and all(0 <= x <= 1920 and 40 < y < 1080 for x, y in corner)  # 挪到框下面、往左收
     menu = label_pixels(((207, 230, 260, 262), "文件"))
     assert menu and all(y < 230 for _, y in menu)  # 有地方时照旧在框上面
+
+
+def test_wait_says_how_long_it_really_waited(monkeypatch):
+    """wait 一次最多等 WAIT_MAX_S 秒：要的更久时照实说只等了多久（原来说"等了 300 秒"，模型以为等够了）。"""
+    from super_aide.cu import actions
+
+    monkeypatch.setattr(actions, "WAIT_MAX_S", 0.05)
+    runner = actions.Runner.__new__(actions.Runner)
+    assert runner._wait(actions.Action(do="wait", seconds=0.01)) == "等了 0.01 秒"
+    said = runner._wait(actions.Action(do="wait", seconds=300))
+    assert said.startswith("只等了 0.05 秒") and "300" in said and "再调一次" in said
+
+
+def test_wait_gone_returns_when_the_text_goes_away(monkeypatch):
+    """wait_gone：等"中断""正在下载"这类只在做事时才有的字消失；控件里找不到了还要认图确认一次。"""
+    from super_aide.cu import actions
+
+    runner = actions.Runner.__new__(actions.Runner)
+    runner.s = type("S", (), {"hwnd": 1})()
+    present = iter([True, True, False])
+    monkeypatch.setattr(actions.elements, "search", lambda hwnd, text, limit=1: [1] if next(present) else [])
+    monkeypatch.setattr(actions, "_seen_on_screen", lambda hwnd, text: False)
+    monkeypatch.setattr(actions.time, "sleep", lambda s: None)
+    assert runner._wait_gone(actions.Action(do="wait_gone", text="中断", seconds=30)).startswith("「中断」不见了")
+    monkeypatch.setattr(actions.elements, "search", lambda hwnd, text, limit=1: [])
+    assert "不用等" in runner._wait_gone(actions.Action(do="wait_gone", text="中断"))
+    monkeypatch.setattr(actions, "_seen_on_screen", lambda hwnd, text: True)  # 控件里没有、图上还在：没消失
+    monkeypatch.setattr(actions, "WAIT_FOR_MAX_S", 0.01)
+    with pytest.raises(RuntimeError, match="还在"):
+        runner._wait_gone(actions.Action(do="wait_gone", text="中断", seconds=0.01))
+
+
+def test_text_from_richedit_keeps_its_line_breaks():
+    """新版记事本这类 RichEdit 控件只用 \r 分行：统一成 \n，模型才看得出分行。"""
+    from super_aide.snapshot.uia import newlines
+
+    assert newlines("会议纪要\r下午三点开会\r\n地点") == "会议纪要\n下午三点开会\n地点"
+
+
+def test_hidden_input_boxes_are_not_reported_as_failed_typing():
+    """网页终端、代码编辑器的隐藏输入框（几乎没有大小）打完会自己清空：不报"可能没输进去"。"""
+    from super_aide.cu import actions
+    from super_aide.cu.elements import Element
+
+    assert actions._hidden_input(Element(1, "Edit", "Terminal input", (-9999, -9999, -9999, -9999)))
+    assert actions._hidden_input(Element(2, "Edit", "", (100, 200, 101, 201)))  # Monaco 的 1×1 输入框
+    assert not actions._hidden_input(Element(3, "Edit", "搜索", (100, 200, 400, 230)))

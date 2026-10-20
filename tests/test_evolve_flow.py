@@ -15,6 +15,7 @@ from PySide6.QtCore import QCoreApplication
 from super_aide import app as app_module
 from super_aide import paths
 from super_aide.config import Config
+from super_aide.decision import Decider
 from super_aide.engines.hub import EVOLVE_HOLD, Conversation, EngineHub
 from super_aide.evolve import agent, manager, prompts
 from super_aide.evolve.agent import Outcome
@@ -252,13 +253,13 @@ def test_running_from_source_holds_the_change(env):
 
 def fake_hub(evolve=None):
     loop = SimpleNamespace(call_later=lambda delay, fn, *a: SimpleNamespace(cancel=lambda: None))
-    return SimpleNamespace(evolve=evolve, loop=loop, _schedule_evolve=lambda conv: None,
+    return SimpleNamespace(evolve=evolve, loop=loop, decider=Decider(Config()), _schedule_evolve=lambda conv: None,
                            _note_trouble=lambda conv, item: conv.trouble.append(item))
 
 
 def live_hub(evolve):
     """用引擎中枢真的攒信号、交出去的那几个方法；计时器记下来，测试里手动触发（= 这么久没再接着问）。"""
-    hub = SimpleNamespace(evolve=evolve, timers=[])
+    hub = SimpleNamespace(evolve=evolve, timers=[], decider=Decider(Config()))
     hub.loop = SimpleNamespace(call_later=lambda delay, fn, *a: hub.timers.append((fn, a))
                                or SimpleNamespace(cancel=lambda: None))
     for name in ("_note_trouble", "_schedule_evolve", "_hand_to_evolve"):

@@ -23,6 +23,7 @@ from .store import Lesson
 log = logging.getLogger(__name__)
 
 SIMILAR_MIN = 0.875
+LOOSE_MIN = 0.85     # 有判断模型复核时的初筛门槛
 PROBLEM_MIN = 0.008
 PROBLEM = ["运行报错了", "安装失败了", "程序卡住没反应", "打开以后全是乱码", "命令被拒绝了", "出错了怎么办", "一直超时连不上",
            "突然崩溃重启了", "提示找不到", "it fails with an error", "connection timed out", "permission denied"]
@@ -116,3 +117,17 @@ class Semantic:
         sims = matrix @ q
         i = int(sims.argmax())
         return (lessons[i], float(sims[i])) if sims[i] >= SIMILAR_MIN else None
+
+    def nearest(self, lessons: list[Lesson], text: str, k: int = 2,
+                floor: float = LOOSE_MIN) -> list[tuple[Lesson, float]]:
+        """意思上最像的几条（初筛用，之后交给判断模型复核）：不看"是不是碰到了问题"，门槛也低一些。
+        同一个话题、不是同一种情况的会混进来，由判断模型挑出去。"""
+        if not lessons or not text.strip() or not self.ready():
+            return []
+        query = self.embedder.encode([text], "query")
+        matrix = self._matrix(lessons)
+        if query is None or matrix is None:
+            return []
+        sims = matrix @ query[0]
+        order = sims.argsort()[::-1][:k]
+        return [(lessons[int(i)], float(sims[i])) for i in order if sims[i] >= floor]

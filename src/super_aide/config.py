@@ -81,6 +81,10 @@ class Config:
     evolve_enabled: bool = True
     #: 社区共建：稳定的改进以你的 GitHub 账号自动提交 PR 到主版本。auto = 能推送主仓库（维护者）时打开，否则关闭
     evolve_contribute: str = "auto"  # auto | on | off
+    #: 判断模型（可选，Jev 类，设计 7.9 节）：路由看任务、学习看追问和停下的原因、经验复核时用。没填地址就照原来的做法
+    decision_url: str = ""
+    decision_key: str = ""
+    decision_model: str = ""
 
     def engine(self, name: str) -> EngineSettings:
         return {"claude": self.claude, "codex": self.codex, "dsh": self.dsh}[name]
@@ -130,6 +134,9 @@ def from_dict(data: dict) -> Config:
         tour_done=bool(data.get("tour", {}).get("done", data.get("setup", {}).get("done", d.tour_done))),
         evolve_enabled=bool(data.get("evolve", {}).get("enabled", d.evolve_enabled)),
         evolve_contribute=_choice(data.get("evolve", {}).get("contribute"), ("auto", "on", "off"), d.evolve_contribute),
+        decision_url=str(data.get("decision", {}).get("url", d.decision_url)),
+        decision_key=str(data.get("decision", {}).get("key", d.decision_key)),
+        decision_model=str(data.get("decision", {}).get("model", d.decision_model)),
     )
 
 
@@ -148,6 +155,7 @@ def to_dict(cfg: Config) -> dict:
         "setup": {"done": cfg.setup_done},
         "tour": {"done": cfg.tour_done},
         "evolve": {"enabled": cfg.evolve_enabled, "contribute": cfg.evolve_contribute},
+        "decision": {"url": cfg.decision_url, "key": cfg.decision_key, "model": cfg.decision_model},
     }
 
 

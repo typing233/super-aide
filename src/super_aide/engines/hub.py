@@ -36,6 +36,8 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from .. import history
+from ..decision import Decider
+from ..decision import checks as decide
 from ..evolve import evidence, triggers
 from ..experience import learn, recall
 from ..i18n import tr
@@ -45,7 +47,7 @@ from ..experience.store import Store
 from ..router import Decision, EngineRouter, Task, judge
 from ..router import report as route_report
 from ..router.judge import Verdict
-from ..router.policy import fg_category
+from ..router.policy import fg_category, task_kind
 from ..snapshot.collector import Context
 from ..snapshot.collector import Session as Snapshot
 from . import browser_use, computer, prompts
@@ -60,6 +62,8 @@ from .dsh import DshEngine
 log = logging.getLogger(__name__)
 
 MAX_REACTIVE = 2  # 一轮里做到一半最多再想起几次（每次最多 3 条）
+KEEP_CONVERSATIONS = 20  # 对话记录最多留这么多个（之前的会话早已关掉，只是记录）
+LOOSE_RECALL = 4  # 有判断模型时初筛最多放进来几条，由它复核（最后给的还是最多 2 条）
 REASK_S = 600     # 这么久之内又问了几乎一样的问题（同一个程序、同样的内容）：上一次多半没答好
 DUEL_DELAY = 15   # 答完过一会儿再在后台对比，不跟你接着问抢
 EVOLVE_DELAY = 600  # 对话结束（这么久没再接着问；Ctrl+Enter 能在 10 分钟内接着问）后自我改进才开始，证据才完整
@@ -152,6 +156,17 @@ def _specifics(question: str) -> set[str]:
     return {m.group(0).strip(".:-/\\").lower() for m in SPECIFIC.finditer(question)} - {""}
 
 
+def _where(situation: recall.Situation) -> str:
+    """给判断模型看的前台：程序名和窗口标题。"""
+    return " · ".join(x for x in (situation.app, situation.title) if x)
+
+
+def _reasked(router: EngineRouter, prev: Conversation) -> None:
+    """很快又问了一样的问题：上一次多半没答好，记一次失败。"""
+    router.record(prev.decision, prev.task, False, "reask")
+    log.info("很快又问了一样的问题：上一次（%s · %s）记一次没答好", prev.decision.model, prev.decision.effort)
+
+
 JUDGE_FRONT_LIMIT = 4000  # 评审看的前台窗口完整内容最多这么多字
 
 
@@ -209,6 +224,7 @@ class Conversation:
     escalate: bool = False      # 上一轮没办成：下一轮换更强的配置
     live_ui: bool = False       # 回答时看过实时屏幕、在屏幕上圈过位置：后台对比的会话没有这些工具，不比
     stopped: bool = False       # 这一轮是你按 Esc 停下的
+    retired: bool = False       # 之后又开了新对话：这个再也接着问不了，这一轮做完就关掉引擎会话
     trouble: list[dict] = field(default_factory=list)  # 交给了自我改进、在等对话结束的信号（没办成、👎、停下的原因）
     evolve_timer: object | None = None
 
@@ -222,6 +238,7 @@ class EngineHub(QObject):
     def __init__(self, router: EngineRouter, instructions: str, blocklist: bool) -> None:
         super().__init__()
         self.router = router
+        self.decider = Decider(router.cfg)  # 判断模型（可选）：没配置时各处照原来的做法
         self.lessons = Store()
         # 本地向量模型：意思相近、字面不同的经验也能想起来。模型在后台下载，好了之前只按字面
         self.semantic = Semantic(Embedder(), self.lessons.path.with_name("vectors.json"))
@@ -287,6 +304,7 @@ class EngineHub(QObject):
     def prewarm(self) -> None:
         """你召唤了助手：本地向量模型不在内存里就在后台加载（约 1.4 秒，打完问题时一般已经好了）。"""
         self._embed_used = time.time()
+        self.decider.warm()  # 判断模型先连上（打完问题时省一次握手）
         embedder = self.semantic.embedder
         if not embedder.loaded() and embedder.downloaded():
             threading.Thread(target=self.semantic.ready, name="embed-load", daemon=True).start()
@@ -301,7 +319,23 @@ class EngineHub(QObject):
     def ask(self, key: str, mode: str, question: str, snap: Snapshot, task: Task) -> None:
         conv = Conversation(key=key, mode=mode, task=task, busy=True)
         self.conversations[key] = conv
+        self.loop.call_soon_threadsafe(self._retire, key)
         self._submit(self._first_turn(conv, question, snap))
+
+    def _retire(self, current: str) -> None:
+        """新开了一个对话：之前的对话再也接着问不了（输入框、胶囊只接着最近的那一个），关掉它们的引擎会话。
+        每个会话都占着东西：Claude 一个 claude.exe 加一套工具服务，DeepSeek Harness 一个会话一套工具服务
+        （实测一个上午攒了 6 套 python 进程没人关）。还在做的，等它这一轮做完再关。
+        对话记录只留最近 KEEP_CONVERSATIONS 个（总结经验、自我改进的计时器拿着对话本身，不靠这里找）。"""
+        for key, conv in list(self.conversations.items()):
+            if key == current or conv.retired:
+                continue
+            conv.retired = True
+            if not conv.busy:
+                self._drop_sessions(conv)
+        for key in list(self.conversations)[:-KEEP_CONVERSATIONS]:
+            if not self.conversations[key].busy:
+                self.conversations.pop(key, None)
 
     def followup(self, key: str, question: str, snap: Snapshot) -> None:
         conv = self.conversations.get(key)
@@ -423,8 +457,10 @@ class EngineHub(QObject):
             situation = snap.situation(question)
             # 路由判断难度看屏幕上框选的内容和报错；找相似的旧任务用问题的向量（向量模型没好就不用）
             conv.task.context, conv.task.errors = situation.text, situation.errors
-            lessons = await loop.run_in_executor(None, self._recall, conv, situation)
+            # 想起经验（有判断模型时顺便判断任务类型和难度，给下面的路由用）和算问题的向量同时做
+            understood = loop.run_in_executor(None, self._understand, conv, situation)
             conv.task.vec = await loop.run_in_executor(None, self._vector, question, situation.text)
+            lessons = await understood
             self._check_reask(conv)
             await self._open(conv)
             notes = self._notes(conv)
@@ -456,6 +492,8 @@ class EngineHub(QObject):
             self._crashed(conv, e)
         finally:
             conv.busy, conv.job = False, None
+            if conv.retired:  # 做的时候又开了新对话：这个再也接着问不了
+                self._drop_sessions(conv)
 
     def _emit_route(self, conv: Conversation, d: Decision) -> None:
         self._emit(conv.key, Event("route", data={"engine": d.engine, "model": d.model, "effort": d.effort,
@@ -489,10 +527,16 @@ class EngineHub(QObject):
         conv.job = asyncio.current_task()
         conv.question = question
         answering = False
+        loop = asyncio.get_running_loop()
         try:
-            conv.ctx = await asyncio.get_running_loop().run_in_executor(None, snap.finalize)
-            lessons = await asyncio.get_running_loop().run_in_executor(None, self._recall, conv,
-                                                                       snap.situation(question))
+            # 追问是不是在说上一轮没答好（"还是报同样的错""重启了也没变化"）：和整理快照、想起经验同时判断
+            previous = conv.record[-1] if conv.record else {}
+            negative = loop.run_in_executor(None, decide.negative_followup, self.decider,
+                                            previous.get("question", ""), previous.get("answer", ""), question)
+            conv.ctx = await loop.run_in_executor(None, snap.finalize)
+            lessons = await loop.run_in_executor(None, self._recall, conv, snap.situation(question))
+            if await negative:
+                self._negative_followup(conv)
             await self._escalate(conv)
             notes = self._notes(conv)
             message = prompts.followup_message(question, conv.ctx, conv.mode, notes, lessons)
@@ -519,6 +563,8 @@ class EngineHub(QObject):
             self._crashed(conv, e)
         finally:
             conv.busy, conv.job = False, None
+            if conv.retired:  # 做的时候又开了新对话：这个再也接着问不了
+                self._drop_sessions(conv)
 
     def _browser_status(self, conv: Conversation) -> browser_use.Status | None:
         """用 Codex 官方的浏览器操作、操作模式、前台是浏览器、而它没接通时，返回原因和修法。
@@ -734,22 +780,58 @@ class EngineHub(QObject):
 
     # ---- 经验 ----
 
-    def _recall(self, conv: Conversation, situation: recall.Situation) -> list:
-        self._embed_used = time.time()
-        """想起和这次情况相似的经验（这次对话里给过的不再给）。对不上就是空列表，首条消息里什么也不加。"""
-        conv.situation = {"text": situation.text[:3000], "errors": situation.errors[:2000], "app": situation.app,
-                          "url": situation.url, "title": situation.title}
+    def _candidates(self, conv: Conversation, situation: recall.Situation, loose: bool) -> list:
+        """初筛：和这次情况相似的经验。loose：放宽一些，之后由判断模型复核；否则是原来的严格对法。"""
         try:
-            found = recall.recall(self.lessons, situation, exclude=conv.seen, semantic=self.semantic)
+            return recall.recall(self.lessons, situation, exclude=conv.seen, semantic=self.semantic,
+                                 limit=LOOSE_RECALL if loose else recall.MAX_RECALL, loose=loose)
         except Exception as e:  # noqa: BLE001 - 想不起来也不能耽误回答
             log.warning("想起经验失败：%s", e)
             return []
+
+    def _reviewed(self, conv: Conversation, situation: recall.Situation, purpose: str) -> list:
+        """有判断模型时放宽初筛、由它复核；判断不了时照原来的严格对法（放宽的不能不经复核就给）。"""
+        if not self.decider.ready():
+            return self._candidates(conv, situation, loose=False)
+        found = self._candidates(conv, situation, loose=True)
+        if not found:
+            return []
+        task = Task(conv.mode, situation.question, "", context=situation.text, errors=situation.errors)
+        kept = decide.review(self.decider, task, found, purpose, where=_where(situation))
+        return kept if kept is not None else self._candidates(conv, situation, loose=False)
+
+    def _remember(self, conv: Conversation, situation: recall.Situation) -> None:
+        conv.situation = {"text": situation.text[:3000], "errors": situation.errors[:2000], "app": situation.app,
+                          "url": situation.url, "title": situation.title}
+
+    def _give(self, conv: Conversation, found: list) -> list:
+        """交给引擎的经验：这一轮记下来（之后按结果算成败），这次对话里不再给第二次。"""
         conv.turn_lessons = [x.id for x in found]
         conv.seen.update(conv.turn_lessons)
         if found:
             log.info("想起经验：%s", "；".join(x.title for x in found))
             self._emit(conv.key, Event("status", tr("想起以前的经验：{title}", title=found[0].title)))
         return found
+
+    def _recall(self, conv: Conversation, situation: recall.Situation) -> list:
+        """想起和这次情况相似的经验（这次对话里给过的不再给）。对不上就是空列表，消息里什么也不加。"""
+        self._embed_used = time.time()
+        self._remember(conv, situation)
+        return self._give(conv, self._reviewed(conv, situation, "lessons"))
+
+    def _understand(self, conv: Conversation, situation: recall.Situation) -> list:
+        """首问：想起经验；有判断模型时一次请求里同时判断任务类型和难度（给路由），并复核初筛出来的经验。"""
+        self._embed_used = time.time()
+        self._remember(conv, situation)
+        if not self.decider.ready():
+            return self._give(conv, self._candidates(conv, situation, loose=False))
+        found = self._candidates(conv, situation, loose=True)
+        legacy = {"kind": task_kind(conv.task)[1], "lessons": [x.id for x in found]}
+        understood = decide.understand(self.decider, conv.task, found, where=_where(situation), legacy=legacy)
+        if understood is None:
+            return self._give(conv, self._candidates(conv, situation, loose=False))
+        conv.task.kind_hint, conv.task.band_hint = understood.kind, understood.band
+        return self._give(conv, understood.lessons or [])
 
     def _recall_more(self, conv: Conversation, text: str) -> str:
         """做到一半，工具结果里出现了报错：再想一次。这一轮最多再想 MAX_REACTIVE 次，给过的不重复。"""
@@ -758,7 +840,7 @@ class EngineHub(QObject):
         env = conv.situation
         situation = recall.Situation(question=conv.question, text=text[:6000], app=env.get("app", ""),
                                      url=env.get("url", ""), title=env.get("title", ""))
-        found = recall.recall(self.lessons, situation, exclude=conv.seen, semantic=self.semantic)
+        found = self._reviewed(conv, situation, "lessons_midway")
         if not found:
             return ""
         conv.reactive += 1
@@ -783,6 +865,12 @@ class EngineHub(QObject):
     def _lessons_used(self, conv: Conversation, done: dict) -> None:
         self.lessons.used(conv.turn_lessons, bool(done.get("ok")) if _counted(done) else None)
         conv.last_lessons, conv.turn_lessons = conv.turn_lessons, []
+
+    def _negative_followup(self, conv: Conversation) -> None:
+        """追问在说上一轮没答好：上一轮的配置记一次失败，这一轮换更强的配置，给它出主意的经验也记一次失败。"""
+        if conv.decision is not None:
+            self.router.record(conv.decision, conv.task, False, "negative_followup")
+        self._bad_turn(conv)
 
     def _bad_turn(self, conv: Conversation) -> None:
         """你说上一轮没答好：给它出主意的经验记一次失败，这次对话也值得总结。"""
@@ -863,11 +951,19 @@ class EngineHub(QObject):
 
     def _on_reason(self, conv: Conversation, kind: str, choice: str, text: str) -> None:
         if kind == "stop":
-            if triggers.stop_counts(choice, text):  # 不答、"不是助手的问题"、"改主意了"都不算
+            if text and choice != triggers.NOT_ASSISTANT and self.decider.ready():
+                # 打了字的原因交给判断模型（"你搞错了，不是这个窗口"是助手的问题，"网太卡了"不是）：在后台判断
+                self.loop.create_task(self._judge_stop(conv, choice, text))
+            elif triggers.stop_counts(choice, text):  # 不答、"不是助手的问题"、"改主意了"都不算
                 self._note_trouble(conv, {"kind": "stopped", "choice": choice, "text": text})
             return
         if self.evolve is not None:  # 👎 一点就交出去了：原因补给那个任务
             self.evolve.add_reason(conv.key, choice, text)
+
+    async def _judge_stop(self, conv: Conversation, choice: str, text: str) -> None:
+        if await asyncio.get_running_loop().run_in_executor(None, decide.stop_fault, self.decider, conv.question,
+                                                            choice, text):
+            self._note_trouble(conv, {"kind": "stopped", "choice": choice, "text": text})
 
     def _note_trouble(self, conv: Conversation, item: dict) -> None:
         item.setdefault("t", time.time())
@@ -927,12 +1023,21 @@ class EngineHub(QObject):
         def same(a: str, b: str) -> bool:
             return SequenceMatcher(None, a, b).ratio() >= 0.8
 
+        same_screen = same(prev.situation.get("text", "")[:500], conv.situation.get("text", "")[:500])
         # 只差了文件名、数字、路径这类具体的东西（"新建 a.txt 内容是 1" → "新建 b.txt 内容是 2"），是一件新的事，
         # 不是没答好又问了一遍（实测：连着几个办成了的同类操作，每个都被记成上一个没答好，路由还一路加强）
-        if same(prev.question, conv.question) and _specifics(prev.question) == _specifics(conv.question) \
-                and same(prev.situation.get("text", "")[:500], conv.situation.get("text", "")[:500]):
-            self.router.record(prev.decision, prev.task, False, "reask")
-            log.info("很快又问了一样的问题：上一次（%s · %s）记一次没答好", prev.decision.model, prev.decision.effort)
+        legacy = same(prev.question, conv.question) and _specifics(prev.question) == _specifics(conv.question) \
+            and same_screen
+        if self.decider.ready():
+            # 判断模型分得清"换个说法又问一遍"（字面不像）和"给张三 → 给李四"（字面很像）：在后台判断，不耽误这次回答
+            self.loop.create_task(self._judge_reask(prev, conv, same_screen, legacy))
+        elif legacy:
+            _reasked(self.router, prev)
+
+    async def _judge_reask(self, prev: Conversation, conv: Conversation, same_screen: bool, legacy: bool) -> None:
+        if await asyncio.get_running_loop().run_in_executor(None, decide.reask, self.decider, prev.question,
+                                                            conv.question, same_screen, legacy):
+            _reasked(self.router, prev)
 
     def _after_first_turn(self, conv: Conversation, done: dict, answer: str) -> None:
         """首问答完：用实际耗时校准路由的快慢估计；问答答得好好的，再看要不要在后台对比一次。"""

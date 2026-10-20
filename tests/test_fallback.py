@@ -7,6 +7,8 @@ import json
 from types import SimpleNamespace
 
 from super_aide import launch
+from super_aide.config import Config
+from super_aide.decision import Decider
 from super_aide.engines import hub as hub_module
 from super_aide.engines.base import Event, friendly_text
 from super_aide.engines.hub import Conversation, EngineHub
@@ -75,12 +77,15 @@ class Hub:
     def __init__(self, engines):
         self.engines, self.router, self.conversations, self.gui = engines, Router(engines), {}, "ours"
         self.loop, self.events, self.saved = asyncio.get_running_loop(), [], []
+        self.decider = Decider(Config())  # 没配置判断模型：照原来的做法
 
     def _emit(self, key, ev):
         self.events.append(ev)
 
     def _recall(self, conv, situation):
         return []
+
+    _understand = _recall
 
     def _vector(self, question, text):
         return None
@@ -199,7 +204,7 @@ def test_similar_tasks_with_different_targets_are_not_reasks():
         c.question, c.situation, c.started = question, {"text": "记事本里的字", "app": "Notepad.exe"}, started
         return c
 
-    hub = SimpleNamespace(router=R(), _last={})
+    hub = SimpleNamespace(router=R(), _last={}, decider=Decider(Config()))
     EngineHub._check_reask(hub, conv(r"在 D:\out 里新建 a.txt，内容是 1", 1000))
     EngineHub._check_reask(hub, conv(r"在 D:\out 里新建 b.txt，内容是 2", 1060))   # 另一件事：不是没答好
     assert hub.router.calls == []

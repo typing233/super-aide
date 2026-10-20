@@ -61,6 +61,12 @@ LABELS = {
     ("qa_factual", "general"): "一般问答", ("code_fix", "dev"): "开发任务", ("agentic", "browser"): "浏览器操作",
     ("agentic", "desktop"): "桌面操作",
 }
+#: 判断模型给的问答任务类型（decision/checks.py）→ (任务类型, 子类)，和上面的关键词分法同一套桶
+ASK_KINDS = {
+    "translation": ("translation", "screen_text"), "writing": ("creative", "writing"),
+    "error": ("code_fix", "explain_error"), "code": ("code_fix", "explain_code"), "ui": ("qa_factual", "ui_help"),
+    "system": ("qa_factual", "system_help"), "general": ("qa_factual", "general"),
+}
 
 #: 参照强度：按模式和难度（0 一般 / 1 较难 / 2 很难）
 REFERENCE = {"ask": ("medium", "high", "xhigh"), "act": ("high", "xhigh", "max")}
@@ -105,6 +111,8 @@ class Task:
     errors: str = ""    # 前台窗口里的报错行
     vec: Any = None     # 问题的向量（找相似的旧任务；向量模型没好时为空）
     id: str = ""        # 第一次决策时分配：这个任务的决策和之后的结果信号都记在它名下（"路由表现"按它对上）
+    kind_hint: str = ""  # 判断模型给的问答任务类型（ASK_KINDS 的键）；空 = 用关键词分
+    band_hint: int = -1  # 判断模型给的难度档；-1 = 没有
 
 
 @dataclass
@@ -353,11 +361,16 @@ class EngineRouter:
 
     def describe(self, task: Task) -> View:
         kind, domain = task_kind(task)
+        if task.mode == "ask" and task.kind_hint in ASK_KINDS:
+            kind, domain = ASK_KINDS[task.kind_hint]  # 判断模型分得比关键词准（"帮我回一下这封邮件""wifi 老掉线"）
         d = self.difficulty(task.question)
         extra = "\n\n".join(x for x in (task.context[:4000], task.errors[:2000]) if x)
         if extra:
             d = max(d, self.difficulty(f"{task.question}\n\n{extra}"))  # 屏幕上的内容只能让难度变高
         band = sum(d >= limit for limit in BAND_LIMITS)
+        # 判断模型也只能让难度变高：短而难的问题（"设计一个多机房限流方案"）原来常被当成简单题，
+        # 它判低了却不采信，先保证办成
+        band = max(band, min(2, task.band_hint))
         if task.mode == "act" and kind == "code_fix":
             band = max(band, 1)  # 开发任务至少算"较难"
         if THINK_HINT.search(task.question):

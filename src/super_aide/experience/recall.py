@@ -179,9 +179,11 @@ def _bm25(docs: list[list[str]], query: set[str], k1: float = 1.2, b: float = 0.
 
 
 def recall(store: Store, situation: Situation, exclude: set[str] | frozenset = frozenset(),
-           limit: int = MAX_RECALL, semantic=None) -> list[Lesson]:
+           limit: int = MAX_RECALL, semantic=None, loose: bool = False) -> list[Lesson]:
     """和这次情况相似的经验，最多 limit 条；都对不上就返回空列表。
-    semantic：本地向量模型（semantic.Semantic），有的话字面没对上的再按意思找一条。"""
+    semantic：本地向量模型（semantic.Semantic），有的话字面没对上的再按意思找一条。
+    loose：初筛（之后交给判断模型复核，decision/checks.py）：提示词对上一个就算，按意思最多补 2 条、门槛低一些。
+    多放进来的"同话题、不同情况"由判断模型挑出去，字面和向量都太严时漏掉的也能捞回来。"""
     lessons = [x for x in store.all() if x.id not in exclude]
     q = _Query(situation)
     if not lessons or not q.tokens:
@@ -191,16 +193,18 @@ def recall(store: Store, situation: Situation, exclude: set[str] | frozenset = f
         strong = sum(_hit(e, q, min_len=6) for e in lesson.errors)
         medium = sum(_hit(t, q) for t in lesson.triggers)
         context = _context(lesson, q)
-        if strong or medium >= 2 or (medium and context):
+        if strong or medium >= 2 or (medium and context) or (loose and medium):
             scored.append((3 * strong + 1.5 * medium + context + bm, lesson))
     if semantic is not None:
         passed = {lesson.id for _score, lesson in scored}
+        rest = [x for x in lessons if x.id not in passed]
         try:
-            hit = semantic.best([x for x in lessons if x.id not in passed], situation.gist())
+            hits = semantic.nearest(rest, situation.gist()) if loose else [semantic.best(rest, situation.gist())]
         except Exception:  # noqa: BLE001 - 模型出问题不能耽误回答，字面那一半照常
-            hit = None
-        if hit is not None:
-            scored.append((1.5 + 10 * (hit[1] - SEMANTIC_BASE), hit[0]))  # 排在字面对上的后面，除非意思特别接近
+            hits = []
+        for hit in hits:
+            if hit is not None:
+                scored.append((1.5 + 10 * (hit[1] - SEMANTIC_BASE), hit[0]))  # 排在字面对上的后面，除非意思特别接近
     scored.sort(key=lambda s: s[0], reverse=True)
     return [lesson for _score, lesson in scored[:limit]]
 
