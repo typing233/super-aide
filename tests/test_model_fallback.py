@@ -50,6 +50,7 @@ def codex_only(*models: str) -> EngineRouter:
     "no available channel for group default and model deepseek-flash",
     "UNKNOWN_MODEL: deepseek-flash is not configured on route self",
     "There's an issue with the selected model (claude-x). It may not exist or you may not have access to it.",
+    '400 {"type":"error","error":{"type":"invalid_request_error","message":"unknown provider for model claude-opus-9-9"}}',
 ])
 def test_model_unavailable_messages(text):
     assert MODEL_UNAVAILABLE.search(text)
