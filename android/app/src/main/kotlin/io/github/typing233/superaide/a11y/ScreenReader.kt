@@ -21,19 +21,23 @@ class ScreenReader(
     private val maxNodes: Int = 4000,
     private val budgetMs: Long = 2500,
 ) {
-    class Result(val screen: Screen, val handles: List<List<AccessibilityNodeInfo>>, val visited: Int, val ms: Long)
+    /** handles 和 screen 里每个窗口的 nodes 一一对应；截图认出的字没有节点，是 null */
+    class Result(val screen: Screen, val handles: List<List<AccessibilityNodeInfo?>>, val visited: Int, val ms: Long,
+                 /** 我们自己的窗口（进度小条、悬浮球）在屏幕上的位置：截整屏认字时去掉这些地方 */
+                 val own: List<Box> = emptyList())
 
     fun read(windows: List<AccessibilityWindowInfo>, width: Int, height: Int, notices: List<Notice>): Result {
         val start = SystemClock.uptimeMillis()
         var visited = 0
         val outWindows = mutableListOf<UiWindow>()
-        val outHandles = mutableListOf<List<AccessibilityNodeInfo>>()
+        val outHandles = mutableListOf<List<AccessibilityNodeInfo?>>()
+        val own = mutableListOf<Box>()
         // 按层级从上到下；自己的窗口不读
         for (w in windows.sortedByDescending { it.layer }) {
             val root = rootOf(w) ?: continue
             val pkg = root.packageName?.toString().orEmpty()
-            if (pkg == ownPackage) continue
             val box = Rect().also(w::getBoundsInScreen).toBox()
+            if (pkg == ownPackage) { own += box; continue }
             if (pkg in blocked) {
                 outWindows += UiWindow(w.title?.toString().orEmpty(), pkg, typeOf(w), w.isActive, w.isFocused, box, emptyList(), blocked = true, id = w.id)
                 outHandles.add(emptyList())
@@ -52,11 +56,14 @@ class ScreenReader(
                     node.getChild(i)?.let { stack.addLast(it to depth + 1) }
                 }
             }
-            outWindows += UiWindow(w.title?.toString().orEmpty(), pkg, typeOf(w), w.isActive, w.isFocused, box, nodes, id = w.id)
+            // App 窗口一个节点都没交出来（微信这样的）：界面只能从截图里认
+            val type = typeOf(w)
+            outWindows += UiWindow(w.title?.toString().orEmpty(), pkg, type, w.isActive, w.isFocused, box, nodes, id = w.id,
+                opaque = type == "app" && nodes.isEmpty())
             outHandles.add(handles)
         }
         val screen = Screen(System.currentTimeMillis(), width, height, outWindows, notices)
-        return Result(screen, outHandles, visited, SystemClock.uptimeMillis() - start)
+        return Result(screen, outHandles, visited, SystemClock.uptimeMillis() - start, own)
     }
 
     private fun rootOf(w: AccessibilityWindowInfo): AccessibilityNodeInfo? =

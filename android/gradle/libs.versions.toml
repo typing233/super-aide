@@ -12,6 +12,7 @@ okhttp = "5.5.0"
 anthropic = "2.73.0"
 junit = "4.13.2"
 markdown = "0.46.0"
+mlkitTextChinese = "16.0.1"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -35,6 +36,7 @@ okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver3", version
 anthropic-java = { module = "com.anthropic:anthropic-java", version.ref = "anthropic" }
 junit = { module = "junit:junit", version.ref = "junit" }
 markdown-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown" }
+mlkit-text-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "mlkitTextChinese" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

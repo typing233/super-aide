@@ -23,9 +23,18 @@ CLAUDE_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
 OPENAI_MODELS = ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna"]
 
 
-def build() -> dict:
+def build(deepseek: bool = False) -> dict:
     env = pc_services()
     services = []
+    if deepseek:
+        # 只用 deepseek-flash（OpenAI Chat 协议），和用户手机上的配置一样
+        if "AIDE_OPENAI_BASE" in env:
+            services.append({
+                "service": {"id": "ds", "name": "deepseek", "wire": "OPENAI_CHAT", "baseUrl": env["AIDE_OPENAI_BASE"]},
+                "key": env["AIDE_OPENAI_KEY"],
+                "models": [{"service": "ds", "id": "deepseek-flash"}],
+            })
+        return {"services": services}
     if "AIDE_ANTHROPIC_BASE" in env:
         services.append({
             "service": {"id": "claude", "name": "Claude", "wire": "ANTHROPIC", "baseUrl": env["AIDE_ANTHROPIC_BASE"], "bearer": True},
@@ -44,8 +53,9 @@ def build() -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--package", default="io.github.typing233.superaide.debug")
+    parser.add_argument("--deepseek", action="store_true", help="只写 deepseek-flash（OpenAI Chat 协议）")
     args = parser.parse_args()
-    data = build()
+    data = build(args.deepseek)
     if not data["services"]:
         print("这台电脑上没找到已配好的服务", file=sys.stderr)
         return 1

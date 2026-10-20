@@ -29,6 +29,8 @@ android {
         targetSdk = 37
         versionCode = appVersionCode
         versionName = appVersion
+        // 截图认字（ML Kit）带原生库：只放手机用的 ARM 两种（x86 的模拟器、Chromebook 能转译 ARM），每种十来 MB
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -81,8 +83,9 @@ android {
 
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/versions/9/OSGI-INF/MANIFEST.MF")
-        // APK 是从 GitHub 下载装的：dex 压缩存放，下载小一半多（安装时多解压一下）
+        // APK 是从 GitHub 下载装的：dex 和原生库都压缩存放，下载小一半多（安装时多解压一下）
         dex.useLegacyPackaging = true
+        jniLibs.useLegacyPackaging = true
     }
 }
 
@@ -101,6 +104,8 @@ dependencies {
     implementation(libs.compose.icons)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.markdown.m3)
+    // 截图认字（中文模型打包在 App 里，不联网、不要谷歌服务）：给不让无障碍读界面的 App（微信）用
+    implementation(libs.mlkit.text.chinese)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)

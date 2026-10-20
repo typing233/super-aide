@@ -22,6 +22,7 @@ import io.github.typing233.superaide.core.llm.Service
 import io.github.typing233.superaide.diag.Diag
 import io.github.typing233.superaide.run.Aide
 import io.github.typing233.superaide.secure.SecretStore
+import io.github.typing233.superaide.a11y.Ocr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
@@ -90,6 +91,49 @@ class DebugReceiver : BroadcastReceiver() {
                 if (bmp != null && i == 0) File(context.filesDir, "debug/shot.jpg").outputStream().use {
                     bmp.compress(Bitmap.CompressFormat.JPEG, 80, it)
                 }
+            }
+
+            // 截前台 App 的窗口认字（不让无障碍读界面的 App 用），只记行数和耗时；arg=save 把结果存到 files/debug/ocr.json
+            "ocr" -> {
+                val svc = AideAccessibilityService.instance ?: error("无障碍没开")
+                val r = withContext(Dispatchers.Default) { svc.readScreen() }
+                val front = r.screen.windows.firstOrNull { it.type == "app" } ?: error("没有前台 App")
+                val t0 = System.nanoTime()
+                val bmp = svc.screenshotOfWindow(front.id)
+                val t1 = System.nanoTime()
+                val filled = Ocr.fill(r, bmp, fullScreen = false, dx = front.box.l, dy = front.box.t)
+                val w = filled.screen.windows.first { it.id == front.id }
+                Diag.log("debug.ocr.result", "pkg=${front.pkg} opaque=${w.opaque} nodes=${w.nodes.size} chars=${w.nodes.sumOf { it.text.length }} " +
+                    "shot=${(t1 - t0) / 1_000_000}ms ocr=${(System.nanoTime() - t1) / 1_000_000}ms")
+                if (arg == "save") File(context.filesDir, "debug/ocr.json")
+                    .writeText(Settings.json.encodeToString(io.github.typing233.superaide.core.screen.Screen.serializer(), filled.screen))
+            }
+
+            // 无障碍输入法（API 33+）往当前焦点输入框里写字
+            "ime" -> {
+                val svc = AideAccessibilityService.instance ?: error("无障碍没开")
+                val im = if (android.os.Build.VERSION.SDK_INT >= 33) svc.inputMethod else null
+                val ic = im?.currentInputConnection
+                val ok = ic?.commitText(arg, 1, null)
+                Diag.log("debug.ime.result", "im=${im != null} ic=${ic != null} ok=$ok")
+            }
+
+            // 当前焦点输入框：光标挪到最后，记下最后 arg 个字（默认 12）和总长度
+            "imetail" -> {
+                val svc = AideAccessibilityService.instance ?: error("无障碍没开")
+                val ic = (if (android.os.Build.VERSION.SDK_INT >= 33) svc.inputMethod else null)?.currentInputConnection ?: error("没有焦点输入框")
+                val all = ic.getSurroundingText(100_000, 100_000, 0)
+                val len = all?.text?.length ?: -1
+                if (len >= 0) ic.setSelection(len, len)
+                Diag.log("debug.imetail.result", "len=$len tail=${all?.text?.takeLast(arg.toIntOrNull() ?: 12)}")
+            }
+
+            // 当前焦点输入框：删掉光标前 arg 个字
+            "imedel" -> {
+                val svc = AideAccessibilityService.instance ?: error("无障碍没开")
+                val ic = (if (android.os.Build.VERSION.SDK_INT >= 33) svc.inputMethod else null)?.currentInputConnection ?: error("没有焦点输入框")
+                ic.deleteSurroundingText(arg.toInt(), 0)
+                Diag.log("debug.imedel.result", arg)
             }
 
             "tap" -> {

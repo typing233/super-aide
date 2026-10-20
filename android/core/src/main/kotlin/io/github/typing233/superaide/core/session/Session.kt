@@ -120,6 +120,11 @@ class Session(
                 if (!followup) firstParts = parts
                 val r = agent!!.turn(parts)
                 return finish(question, started, r, c, trace)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // 被打断（停止键、等太久）：做过的步骤也记进历史，事后看得到停在哪一步
+                records += TurnRecord(question, "", ok = false, stopped = true, service = c.service.id, model = c.model.id, effort = c.effort,
+                    seconds = started.elapsedNow().inWholeMilliseconds / 1000.0, tools = trace.size, trace = trace.toList())
+                throw e
             } catch (e: ModelError) {
                 val kind = Failure.kind(e)
                 val next = if (kind != Failure.Kind.NONE && handovers < maxHandovers) {

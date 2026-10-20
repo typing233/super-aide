@@ -3,6 +3,7 @@ package io.github.typing233.superaide
 import android.app.Application
 import io.github.typing233.superaide.a11y.SelfHeal
 import io.github.typing233.superaide.assist.AssistantRoute
+import io.github.typing233.superaide.core.llm.Chats
 import io.github.typing233.superaide.data.SettingsStore
 import io.github.typing233.superaide.diag.Diag
 import io.github.typing233.superaide.secure.SecretStore
@@ -35,6 +36,11 @@ class AideApp : Application() {
         Diag.init(this)
         settings = SettingsStore(this)
         secrets = SecretStore(this)
+        // 服务说某个模型不收图片：记下来，以后只给它文字
+        Chats.onNoVision = { service, model ->
+            Diag.log("model.novision", "$service/$model")
+            settings.update { s -> s.copy(models = s.models.map { if (it.service == service && it.id == model) it.copy(vision = false) else it }) }
+        }
         // 被强行停止过（清理后台、划掉最近任务）：无障碍被系统去掉了，有权限就加回去
         runCatching { SelfHeal.ensure(this) }
         // 系统绑定默认助手服务要一点时间：过几秒再看它绑上没有；顺便每天查一次更新

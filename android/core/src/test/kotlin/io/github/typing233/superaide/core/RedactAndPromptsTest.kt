@@ -33,6 +33,21 @@ class RedactAndPromptsTest {
         assertEquals("普通文字不受影响", Redact.apply("普通文字不受影响"))
     }
 
+    @Test fun waitingForUserIsNotAFailure() {
+        assertEquals(null, Prompts.reportedFailure("待你确认：输入框里有你没发的草稿，没有发送"))
+    }
+
+    @Test fun oldSettingsStopGuessingVisionByName() {
+        val old = io.github.typing233.superaide.core.config.Settings(models = listOf(
+            io.github.typing233.superaide.core.config.ModelEntry("s", "deepseek-flash", vision = false)))
+        val migrated = old.migrate()
+        assertTrue(migrated.models.single().vision)
+        assertEquals(io.github.typing233.superaide.core.config.Settings.SCHEMA, migrated.schema)
+        // 迁移过的不再动：之后发现不收图片记下的 false 要留着
+        val later = migrated.copy(models = listOf(migrated.models.single().copy(vision = false)))
+        assertEquals(false, later.migrate().models.single().vision)
+    }
+
     @Test fun reportedFailureReadsFirstLine() {
         assertEquals("没完成：Browser Use 未连接", Prompts.reportedFailure("没完成：Browser Use 未连接\n本次未修改任何东西"))
         assertEquals("没完成**：网址检查没通过", Prompts.reportedFailure("**没完成**：网址检查没通过"))

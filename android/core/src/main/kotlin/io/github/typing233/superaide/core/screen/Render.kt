@@ -48,9 +48,10 @@ object EnvText {
             if (w.type == "ime") continue
             out.appendLine("== ${x.label(w.pkg)}（${w.pkg}）${typeNote(w)} ==")
             if (w.blocked) { out.appendLine("（隐私名单里的 App，没有读取内容）"); continue }
+            if (w.opaque) out.appendLine(if (w.nodes.isEmpty()) OPAQUE_BLANK else OPAQUE_OCR)
             val text = windowText(w).take(minOf(PER_WINDOW, budget))
             budget -= text.length
-            out.appendLine(text.ifBlank { "（这个窗口没有交出文字，看截图）" })
+            if (!w.opaque || text.isNotBlank()) out.appendLine(text.ifBlank { "（这个窗口没有交出文字，看截图）" })
             if (budget <= 0) { out.appendLine("……（文字太多，后面的没列出，可以用 read 工具读）"); break }
         }
         return out.toString().trimEnd()
@@ -62,15 +63,32 @@ object EnvText {
         else -> if (w.active) "当前窗口" else ""
     }
 
-    /** 一个窗口的全部文字，一个元素一行；相邻重复的行只留一行。 */
+    /** 一个窗口的全部文字，一个元素一行；相邻重复的行只留一行。截图识别的行前面标上靠左/靠右。 */
     fun windowText(w: UiWindow): String {
         val lines = mutableListOf<String>()
         for (n in w.nodes) {
-            val line = lineOf(n) ?: continue
+            val line = (if (n.ocr) side(n.box, w.box) + n.text else lineOf(n)) ?: continue
             if (lines.lastOrNull() != line) lines += line
         }
         return Redact.apply(lines.joinToString("\n"))
     }
+
+    /** 截图识别的一行在窗口里靠哪边：聊天里靠左一般是对方说的，靠右是自己发的 */
+    fun side(b: Box, win: Box): String {
+        val w = win.w.takeIf { it > 0 } ?: return ""
+        val left = (b.l - win.l).toDouble() / w
+        val right = (win.r - b.r).toDouble() / w
+        val center = (b.cx - win.l).toDouble() / w
+        return when {
+            center < 0.45 && left < 0.3 && right > 0.2 -> "左｜"
+            center > 0.55 && right < 0.3 && left > 0.2 -> "右｜"
+            else -> ""
+        }
+    }
+
+    const val OPAQUE_OCR = "（这个 App 不让无障碍读界面，下面是截图文字识别（OCR）的结果：个别字可能认错，没有字的图标、输入框不在里面。" +
+        "按位置从上到下排；「左｜」「右｜」是这一行靠左还是靠右，聊天里靠左一般是对方说的，靠右是自己发的）"
+    const val OPAQUE_BLANK = "（这个 App 不让无障碍读界面，也没能从截图里识别出文字：只能看截图）"
 
     private fun lineOf(n: UiNode): String? {
         val label = when {
@@ -118,8 +136,13 @@ class Observation(val screen: Screen, val scale: Double, val shotW: Int, val sho
         screen.windows.forEachIndexed { wi, w ->
             if (w.type == "ime" || w.blocked) return@forEachIndexed
             w.nodes.forEachIndexed { ni, n ->
-                if (n.actionable() && !n.box.isEmpty()) refs += Ref(refs.size + 1, wi, ni, nameOf(w.nodes, ni))
+                if ((n.actionable() || n.ocr) && !n.box.isEmpty()) refs += Ref(refs.size + 1, wi, ni, nameOf(w.nodes, ni))
             }
+        }
+        screen.windows.firstOrNull { it.opaque && !it.blocked }?.let { w ->
+            lines += if (w.nodes.isEmpty()) "${label(w.pkg)} 不让无障碍读界面，也没能从截图里识别出文字：看截图，用截图坐标 x、y 操作。"
+            else "${label(w.pkg)} 不让无障碍读界面：标 OCR 的是从截图里识别出的文字（位置准，个别字可能认错），用它的编号就是点那个位置；" +
+                "图标、输入框这类没有字的地方看截图，用截图坐标 x、y。输入文字：先点输入框，再 type（不给 id），字会进当前有焦点的输入框。"
         }
         // 能操作的太少（自绘界面、网页里的纯文字链接等）：把有字的元素也编上号
         if (refs.size < FEW) screen.windows.forEachIndexed { wi, w ->
@@ -197,6 +220,7 @@ class Observation(val screen: Screen, val scale: Double, val shotW: Int, val sho
     }
 
     private fun roleOf(n: UiNode) = when {
+        n.ocr -> "OCR"
         n.editable -> "Edit"
         n.role.isBlank() || n.role == "View" || n.role.endsWith("Layout") || n.role == "ViewGroup" -> if (n.clickable) "Item" else "View"
         else -> n.role

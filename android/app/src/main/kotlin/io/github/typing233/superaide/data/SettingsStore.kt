@@ -24,5 +24,5 @@ class SettingsStore(context: Context) {
 
     private fun load(): Settings = runCatching {
         Settings.json.decodeFromString(Settings.serializer(), file.readText())
-    }.getOrDefault(Settings())
+    }.getOrDefault(Settings(schema = Settings.SCHEMA)).migrate()
 }

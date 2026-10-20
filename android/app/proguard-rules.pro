@@ -27,3 +27,12 @@
 -dontwarn java.lang.reflect.AnnotatedType
 -dontwarn java.lang.reflect.AnnotatedParameterizedType
 -dontwarn com.github.victools.**
+
+# ML Kit 截图认字：识别器和原生识别管线靠反射、JNI 按名字找类和方法（组件注册类的构造函数、bundled 管线的回调），
+# R8 删改以后建识别器时 NullPointerException（2026-10-20 在手机上的 staging 包里遇到）：整个保留
+-keep class com.google.mlkit.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_text_bundled_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_text_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_vision_common.** { *; }
+-keep class com.google.android.gms.internal.mlkit_common.** { *; }
+-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); *; }

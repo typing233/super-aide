@@ -36,6 +36,8 @@ data class UiNode(
     val onScreen: Boolean = true,
     /** 列表的总项数（CollectionInfo），不是列表为 -1 */
     val items: Int = -1,
+    /** 截图文字识别（OCR）出来的一行：没有无障碍节点，操作它就是点它所在的位置 */
+    val ocr: Boolean = false,
 )
 
 @Serializable
@@ -52,6 +54,8 @@ data class UiWindow(
     val blocked: Boolean = false,
     /** 无障碍窗口 id（截某个窗口用），-1 表示不知道 */
     val id: Int = -1,
+    /** App 不让无障碍读界面（比如微信：节点是空的或被打乱）。这时 nodes 是截图文字识别的结果，或者是空的 */
+    val opaque: Boolean = false,
 )
 
 @Serializable
