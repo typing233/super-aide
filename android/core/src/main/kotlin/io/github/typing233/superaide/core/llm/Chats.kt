@@ -6,6 +6,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.time.TimeSource
 
 object Chats {
+    /** 服务说某个模型不收图片（服务 id, 模型）：App 记进设置，以后不再给它发图 */
+    @Volatile
+    var onNoVision: ((String, String) -> Unit)? = null
+
     fun open(
         service: Service,
         key: String,
@@ -47,7 +51,8 @@ object ModelProbe {
     suspend fun run(open: (system: String, tools: List<ToolSpec>) -> Chat, image: ByteArray?): Report {
         val started = TimeSource.Monotonic.markNow()
         var first = -1L
-        val chat = open("You are a connection test. Do exactly what is asked, briefly.", listOf(tool))
+        val chat = runCatching { open("You are a connection test. Do exactly what is asked, briefly.", listOf(tool)) }
+            .getOrElse { return Report(false, "", error = it.message ?: it.toString()) }
         return try {
             val parts = buildList {
                 if (image != null) add(Part.Image(image))
@@ -71,6 +76,11 @@ object ModelProbe {
             )
         } catch (e: ModelError) {
             Report(false, chat.model, totalMs = started.elapsedNow().inWholeMilliseconds, error = "${e.status ?: ""} ${e.message}".trim())
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 地址写错这类（请求都发不出去）：报出来，别让设置页崩掉
+            Report(false, chat.model, totalMs = started.elapsedNow().inWholeMilliseconds, error = e.message ?: e.toString())
         }
     }
 }

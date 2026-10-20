@@ -191,7 +191,7 @@ class MainActivity : ComponentActivity() {
             if (settings.services.isEmpty()) Text(tr("还没有模型服务：加一个才能用。"), color = t.text2, fontSize = 14.sp, modifier = Modifier.padding(12.dp))
             for (svc in settings.services) {
                 Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("${svc.name} · ${runCatching { URI(svc.baseUrl).host }.getOrNull() ?: svc.baseUrl}", color = t.text,
+                    Text("${svc.name} · ${runCatching { URI(svc.url).host }.getOrNull() ?: svc.baseUrl}", color = t.text,
                         fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
                     // 删除要点两次：第一次变成"再点一次删除"
                     Text(if (confirmDelete == svc.id) tr("再点一次删除") else tr("删除"), color = if (confirmDelete == svc.id) t.err else t.text3,
@@ -246,12 +246,11 @@ class MainActivity : ComponentActivity() {
                 if (base.isBlank() || key.isBlank() || ids.isEmpty()) return@SettingsRow
                 val id = "s" + System.currentTimeMillis()
                 AideApp.instance.secrets.put(SecretStore.serviceKey(id), key.trim())
+                // 只填了域名的补上 https://；收不收图片不按名字猜，「测试连接」和真用的时候会发现
+                val service = Service(id, "", wire, base.trim(), bearer = wire == Wire.ANTHROPIC && !base.contains("anthropic.com"))
+                    .let { it.copy(baseUrl = it.url, name = name.ifBlank { runCatching { URI(it.url).host }.getOrNull() ?: base.trim() }) }
                 AideApp.instance.settings.update { s ->
-                    s.copy(
-                        services = s.services + Service(id, name.ifBlank { runCatching { URI(base.trim()).host }.getOrNull() ?: base }, wire, base.trim(),
-                            bearer = wire == Wire.ANTHROPIC && !base.contains("anthropic.com")),
-                        models = s.models + ids.map { ModelEntry(id, it, vision = !it.contains("deepseek")) },
-                    )
+                    s.copy(services = s.services + service, models = s.models + ids.map { ModelEntry(id, it) })
                 }
                 done()
             }
@@ -356,9 +355,12 @@ class MainActivity : ComponentActivity() {
         for (m in settings.models.filter { it.enabled }) {
             val service = settings.service(m.service) ?: continue
             val key = app.secrets.get(SecretStore.serviceKey(service.id)) ?: continue
-            val r = ModelProbe.run({ system, tools -> Chats.open(service, key, m.id, Effort.LOW, system, tools, m.vision) },
-                if (m.vision) redJpeg() else null)
-            lines += "${m.id}：" + (if (r.ok) tr("能用") + " · ${r.totalMs}ms" + (if (m.vision && !r.vision) " · " + tr("没认出图") else "")
+            // 每次都带一张图测：认得出就记成收图（截图会发给它），认不出就只给它文字
+            val r = runCatching {
+                ModelProbe.run({ system, tools -> Chats.open(service, key, m.id, Effort.LOW, system, tools, vision = true) }, redJpeg())
+            }.getOrElse { ModelProbe.Report(false, m.id, error = it.message ?: it.toString()) }
+            if (r.ok) app.settings.update { s -> s.copy(models = s.models.map { if (it.service == m.service && it.id == m.id) it.copy(vision = r.vision) else it }) }
+            lines += "${m.id}：" + (if (r.ok) tr("能用") + " · ${r.totalMs}ms · " + (if (r.vision) tr("能看图") else tr("看不了图，只给它文字"))
             else tr("不能用") + " · ${r.error}")
         }
         return lines.joinToString("\n")

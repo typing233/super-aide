@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -19,7 +20,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ADB = r"D:\Android\sdk\platform-tools\adb.exe"
-PKG = "io.github.typing233.superaide.debug"
+# 要测 staging（R8 压缩过的正式包）就设 AIDE_PKG=io.github.typing233.superaide.staging
+PKG = os.environ.get("AIDE_PKG", "io.github.typing233.superaide.debug")
 APK = ROOT / "android" / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
 A11Y = f"{PKG}/io.github.typing233.superaide.a11y.AideAccessibilityService"
 ACTION = "io.github.typing233.superaide.DEBUG"

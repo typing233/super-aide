@@ -45,8 +45,8 @@ class OpenAiChat(
     private var effort: Effort,
     private val system: String,
     private val tools: List<ToolSpec>,
-    /** 模型收不收图片（DeepSeek 不收） */
-    private val vision: Boolean = true,
+    /** 模型收不收图片：不收的只给文字。服务说不收图片时会自动改成 false 重发 */
+    private var vision: Boolean = true,
     http: OkHttpClient = defaultHttp,
 ) : Chat {
     override var model: String = model
@@ -55,7 +55,7 @@ class OpenAiChat(
     private val http = http.newBuilder()
         .apply { AnthropicChat.proxyOf(service.proxy)?.let { proxy(it) } }
         .build()
-    private val base = service.baseUrl.trimEnd('/').let { if (Regex("""/v\d+$""").containsMatchIn(it)) it else "$it/v1" }
+    private val base = service.url.trimEnd('/').let { if (Regex("""/v\d+$""").containsMatchIn(it)) it else "$it/v1" }
     private val history = mutableListOf<JsonObject>()
 
     override fun switchModel(model: String, effort: Effort) {
@@ -83,7 +83,32 @@ class OpenAiChat(
                 if (extra.isNotEmpty()) history += userItem(listOf(Part.Text("（上面工具返回的图片）")) + extra, responses)
             }
         }
-        return if (responses) responsesTurn(onDelta) else chatTurn(onDelta)
+        return try {
+            if (responses) responsesTurn(onDelta) else chatTurn(onDelta)
+        } catch (e: ModelError) {
+            // 服务说这个模型不收图片：去掉图片重发一次，记下来以后不再发
+            if (!vision || e.status !in setOf(400, 415, 422) || !NO_IMAGES.containsMatchIn(e.message.orEmpty()) || !stripImages()) throw e
+            vision = false
+            Chats.onNoVision?.invoke(service.id, model)
+            if (responses) responsesTurn(onDelta) else chatTurn(onDelta)
+        }
+    }
+
+    /** 历史里的图片换成一句文字。有图片才返回 true */
+    private fun stripImages(): Boolean {
+        var found = false
+        for ((i, item) in history.withIndex()) {
+            val content = item["content"] as? JsonArray ?: continue
+            if (content.none { (it as? JsonObject)?.str("type") in IMAGE_TYPES }) continue
+            found = true
+            val responses = content.any { (it as? JsonObject)?.str("type")?.startsWith("input_") == true }
+            history[i] = JsonObject(item + ("content" to JsonArray(content.map { c ->
+                if ((c as? JsonObject)?.str("type") in IMAGE_TYPES) buildJsonObject {
+                    put("type", if (responses) "input_text" else "text"); put("text", NO_IMAGE_TEXT)
+                } else c
+            })))
+        }
+        return found
     }
 
     // ---------------- Responses ----------------
@@ -261,7 +286,7 @@ class OpenAiChat(
                     if (responses) { put("type", "input_image"); put("image_url", url) }
                     else { put("type", "image_url"); putJsonObject("image_url") { put("url", url) } }
                 } else addJsonObject {
-                    put("type", if (responses) "input_text" else "text"); put("text", "（截图略：这个模型不收图片）")
+                    put("type", if (responses) "input_text" else "text"); put("text", NO_IMAGE_TEXT)
                 }
             }
         }
@@ -297,6 +322,10 @@ class OpenAiChat(
 
     companion object {
         private val JSON = "application/json".toMediaType()
+        private val IMAGE_TYPES = setOf("image_url", "input_image")
+        private const val NO_IMAGE_TEXT = "（截图略：这个模型不收图片）"
+        /** 服务拒收图片时的报错（各家说法不一） */
+        val NO_IMAGES = Regex("image|vision|multimodal|multi-modal|图片|图像|多模态", RegexOption.IGNORE_CASE)
         private val json = Json { ignoreUnknownKeys = true }
 
         val defaultHttp: OkHttpClient = OkHttpClient.Builder()

@@ -5,15 +5,19 @@ import android.accessibilityservice.GestureDescription
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.os.Build
+import android.text.InputType
 import android.view.Display
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import android.view.inputmethod.EditorInfo
 import io.github.typing233.superaide.AideApp
 import io.github.typing233.superaide.BuildConfig
 import io.github.typing233.superaide.core.screen.Notice
 import io.github.typing233.superaide.diag.Diag
 import io.github.typing233.superaide.run.Aide
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -39,6 +43,7 @@ class AideAccessibilityService : AccessibilityService() {
         _running.value = true
         Diag.log("a11y.connected")
         runCatching { overlays.start(AideApp.instance.scope) }.onFailure { Diag.error("overlays", it) }
+        AideApp.instance.scope.launch(Dispatchers.Default) { Ocr.warmUp() }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -129,6 +134,44 @@ class AideAccessibilityService : AccessibilityService() {
                 }
             })
         }
+    }
+
+    /**
+     * 用无障碍输入法（API 33+）往当前有焦点的输入框里写字。和输入法一样走输入连接，不靠界面节点：
+     * 不让无障碍读界面的 App（微信）也能输入。没有获得焦点的输入框返回 null。
+     */
+    /** 有焦点的输入框：里面的字、是不是多行（聊天框、正文这类） */
+    class Field(val text: String, val multiLine: Boolean)
+
+    /** 当前有焦点的输入框（经无障碍输入法读，API 33+）；没有获得焦点的输入框返回 null */
+    fun imeField(): Field? {
+        if (Build.VERSION.SDK_INT < 33) return null
+        val im = inputMethod ?: return null
+        val ic = im.currentInputConnection ?: return null
+        val type = im.currentInputEditorInfo?.inputType ?: 0
+        val multi = type and (InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_IME_MULTI_LINE) != 0
+        return Field(ic.getSurroundingText(10_000, 10_000, 0)?.text?.toString().orEmpty(), multi)
+    }
+
+    fun imeType(text: String, replace: Boolean, enter: Boolean): String? {
+        if (Build.VERSION.SDK_INT < 33) return null
+        val im = inputMethod ?: return null
+        val ic = im.currentInputConnection ?: return null
+        if (replace) ic.performContextMenuAction(android.R.id.selectAll)
+        ic.commitText(text, 1, null)
+        val now = ic.getSurroundingText(2000, 2000, 0)?.text?.toString()
+        val warn = if (now != null && text !in now) "（填完读回来是「${now.take(60)}」，和要填的不一样，看一下）" else ""
+        if (!enter) return "输入「${text.take(40)}」$warn"
+        val info = im.currentInputEditorInfo
+        val action = (info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
+        val multiLine = info != null && info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0
+        val noAction = info != null && info.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0
+        if (multiLine || noAction || action == EditorInfo.IME_ACTION_NONE || action == EditorInfo.IME_ACTION_UNSPECIFIED) {
+            // 多行输入框（聊天框常这样）回车是换行：不按，让模型去点发送按钮
+            return "输入「${text.take(40)}」$warn（这个输入框回车是换行，没有按：要发送就点「发送」按钮）"
+        }
+        ic.performEditorAction(action)
+        return "输入「${text.take(40)}」并回车$warn"
     }
 
     /** 在屏幕坐标 (x, y) 上点一下（或按住 ms 毫秒）。 */

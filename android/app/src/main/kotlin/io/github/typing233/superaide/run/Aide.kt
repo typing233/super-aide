@@ -5,8 +5,10 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
 import io.github.typing233.superaide.AideApp
+import io.github.typing233.superaide.BuildConfig
 import io.github.typing233.superaide.a11y.AideAccessibilityService
 import io.github.typing233.superaide.a11y.FullRead
+import io.github.typing233.superaide.a11y.Ocr
 import io.github.typing233.superaide.a11y.PhoneTools
 import io.github.typing233.superaide.a11y.ScreenReader
 import io.github.typing233.superaide.a11y.SelfHeal
@@ -21,6 +23,7 @@ import io.github.typing233.superaide.core.llm.Part
 import io.github.typing233.superaide.core.prompts.Prompts
 import io.github.typing233.superaide.core.screen.EnvText
 import io.github.typing233.superaide.core.screen.Observation
+import io.github.typing233.superaide.core.screen.Opaque
 import io.github.typing233.superaide.core.screen.partialLists
 import io.github.typing233.superaide.core.screen.Screen
 import io.github.typing233.superaide.core.session.CardState
@@ -183,16 +186,25 @@ object Aide {
         return Pre(read, shot)
     }
 
-    /** 界面出来以后：只截那个 App 的窗口（截不到再截整屏） */
+    /**
+     * 界面出来以后：只截那个 App 的窗口（截不到再截整屏）。前台 App 不让无障碍读界面（微信）时，从这张截图里认字补上；
+     * 界面出来以后才截的整屏上有我们自己的界面，不拿来认字。
+     */
     private suspend fun finishCapture(pre: Pre): Capture = withContext(Dispatchers.Default) {
         val svc = AideAccessibilityService.instance ?: return@withContext Capture(null, null, source = "none")
-        val screen = pre.read?.screen
+        var read = pre.read
         val shot = runCatching {
-            val front = screen?.windows?.firstOrNull { it.type == "app" }
-            val bmp = pre.shot ?: (if (Build.VERSION.SDK_INT >= 34 && front != null) svc.screenshotOfWindow(front.id) else null) ?: svc.screenshot()
+            val front = read?.screen?.windows?.firstOrNull { it.type == "app" }
+            val window = if (pre.shot == null && Build.VERSION.SDK_INT >= 34 && front != null) svc.screenshotOfWindow(front.id) else null
+            val bmp = pre.shot ?: window ?: svc.screenshot()
+            if (read != null && front != null && (pre.shot != null || window != null)) {
+                read = Ocr.fill(read!!, bmp, fullScreen = pre.shot != null, dx = if (window != null) front.box.l else 0, dy = if (window != null) front.box.t else 0)
+            }
             bmp?.let { Shots.jpeg(Shots.scaled(it, Observation.scaleFor(it.width, it.height))) }
         }.getOrNull()
-        Diag.log("capture", "ms=${pre.read?.ms} nodes=${screen?.windows?.sumOf { it.nodes.size }} shot=${shot?.size}")
+        val screen = read?.screen
+        Diag.log("capture", "ms=${pre.read?.ms} nodes=${screen?.windows?.sumOf { it.nodes.size }} shot=${shot?.size}" +
+            (screen?.windows?.firstOrNull { it.opaque }?.let { " opaque=${it.pkg} ocr=${it.nodes.size}" } ?: ""))
         Capture(screen, shot)
     }
 
@@ -269,9 +281,10 @@ object Aide {
                 _card.value = c.copy(fullPage = false, error = tr("没能翻完这一页：没找到能滚动的列表。"))
                 return@launch
             }
-            val env = "【屏幕上的文字】把「${apps.label(pkg)}」里的列表从当前位置往下翻了 ${result.pages} 屏读到的全部内容（逐字原文；" +
-                "列表报告的总项数常把分隔线、分组标题也算进去，比实际条目多是正常的）：\n" + result.text.take(40_000)
-            run("用户点了「读完整页」：环境里是把列表往下翻完读到的全部内容。请根据完整内容重新回答刚才的问题：${c.question}",
+            val env = (if (result.how.isNotEmpty()) "【屏幕上的文字】在「${apps.label(pkg)}」里翻页读到的全部内容${result.how}：\n"
+            else "【屏幕上的文字】把「${apps.label(pkg)}」里的列表从当前位置往下翻了 ${result.pages} 屏读到的全部内容（逐字原文；" +
+                "列表报告的总项数常把分隔线、分组标题也算进去，比实际条目多是正常的）：\n") + result.text.take(40_000)
+            run("用户点了「读完整页」：环境里是翻页读到的全部内容。请根据完整内容重新回答刚才的问题：${c.question}",
                 followup = true, display = tr("读完整页后重新回答"), envOverride = env)
         }
     }
@@ -294,9 +307,11 @@ object Aide {
                 frontApp = cap.screen?.windows?.firstOrNull { it.type == "app" }?.pkg ?: frontApp
                 val env = envOverride ?: cap.screen?.let { EnvText.render(it, EnvText.Extras(apps::label, Device.line(app), cap.clipboard)) }
                     ?: tr("（没有读到屏幕：无障碍服务没开，或者是受保护的页面）")
-                // 问答第一轮：列表只加载了一部分，答完给一个「读完整页」
-                val lists = if (s.mode == Mode.ASK && !followup) cap.screen?.windows?.firstOrNull { it.type == "app" }?.partialLists().orEmpty() else emptyList()
-                val partial = lists.isNotEmpty()
+                // 问答第一轮：列表只加载了一部分，答完给一个「读完整页」。不让无障碍读界面的 App 只认得出屏幕上看得到的字，也给
+                val frontWindow = cap.screen?.windows?.firstOrNull { it.type == "app" }
+                val lists = if (s.mode == Mode.ASK && !followup) frontWindow?.partialLists().orEmpty() else emptyList()
+                val opaque = s.mode == Mode.ASK && !followup && frontWindow?.opaque == true && !frontWindow.blocked
+                val partial = lists.isNotEmpty() || opaque
                 val images = listOfNotNull(cap.shot?.let { Part.Image(it) })
                 val notes = buildList {
                     if (cap.screen == null && envOverride == null) add("这次没能读取屏幕内容（无障碍服务没开）。需要看屏幕才能回答的，请让用户在设置里打开超级助手的无障碍权限。")
@@ -304,6 +319,10 @@ object Aide {
                 lists.firstOrNull()?.let { (total, loaded) ->
                     notes += "屏幕上的列表只加载了一部分（列表报告共 $total 项，现在读到 $loaded 项；总数常把分隔线、分组标题这类没有文字的项也算进去）。用户要的是完整内容时，请用户点回答下面的「读完整页」，" +
                         "你会把列表翻到底读一遍再答；不要让用户自己去滑、再叫你一次。"
+                }
+                if (opaque && lists.isEmpty()) {
+                    notes += "${apps.label(frontWindow!!.pkg)} 不让无障碍读界面，环境里的字是从截图里认出来的，只有屏幕上看得到的部分。" +
+                        "用户要的是完整内容（整篇文章、更早的聊天记录）而屏幕上不全时，请用户点回答下面的「读完整页」，你会翻一遍读完再答；不要让用户自己去滑、再叫你一次。"
                 }
                 val t = routing.task(s.mode, question, frontApp, frontText(cap), errorLines(cap))
                 task = t
@@ -334,13 +353,24 @@ object Aide {
         }
     }
 
-    /** 追问时重新读一次屏幕文字（不截图：屏幕上现在可能是我们自己的卡片） */
-    private fun recapture(): Capture {
+    /**
+     * 追问时重新读一次屏幕文字（不把截图发出去：屏幕上现在可能是我们自己的卡片）。
+     * 不让无障碍读界面的 App：API 34+ 只截它自己的窗口（卡片不在上面），认字补上。
+     */
+    private suspend fun recapture(): Capture {
         val svc = AideAccessibilityService.instance ?: return Capture(null, null)
-        return Capture(runCatching { svc.readScreen().screen }.getOrNull(), null)
+        var read = runCatching { svc.readScreen() }.getOrNull() ?: return Capture(null, null)
+        val front = read.screen.windows.firstOrNull { it.type == "app" }
+        if (front != null && (front.opaque || front.pkg in Opaque.SCRAMBLERS) && Build.VERSION.SDK_INT >= 34) {
+            val bmp = runCatching { svc.screenshotOfWindow(front.id) }.getOrNull()
+            read = Ocr.fill(read, bmp, fullScreen = false, dx = front.box.l, dy = front.box.t)
+        }
+        return Capture(read.screen, null)
     }
 
     private fun onEvent(e: Event) {
+        // 调试版把每一步记进日志（正式版不记：进度文字里可能有屏幕上的字）
+        if (BuildConfig.DEBUG && e.type == "status" && e.data["transient"] != true) Diag.log("step", e.text)
         _card.value = (_card.value ?: CardState()).reduce(e)
         lastActive = System.currentTimeMillis()
         if (e.type == "done") {

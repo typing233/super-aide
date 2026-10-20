@@ -160,5 +160,7 @@
   "正在把这一页翻到底读一遍…": "Reading the whole page…",
   "还没想起过": "Not recalled yet",
   "想起过 {uses} 次": "Recalled {uses}×",
-  "没有安装": "Not installed"
+  "没有安装": "Not installed",
+  "能看图": "sees images",
+  "看不了图，只给它文字": "can't see images, text only"
 }

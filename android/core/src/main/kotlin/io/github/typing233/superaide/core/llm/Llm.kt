@@ -24,7 +24,14 @@ data class Service(
     val bearer: Boolean = false,
     /** 可选代理，如 http://127.0.0.1:7890 */
     val proxy: String = "",
-)
+) {
+    /** 请求用的地址：只填了域名的（api.example.com）补上 https:// */
+    val url: String get() = baseUrl.trim().let { if (SCHEME.containsMatchIn(it)) it else "https://$it" }
+
+    companion object {
+        private val SCHEME = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
+    }
+}
 
 sealed interface Part {
     data class Text(val text: String) : Part

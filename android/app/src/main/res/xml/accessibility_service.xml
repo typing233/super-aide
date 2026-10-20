@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 读屏（所有窗口的文字、截图）和操作（点击、输入、手势）。按键过滤只在任务进行中临时打开（音量下键停止）。 -->
+<!-- 读屏（所有窗口的文字、截图）和操作（点击、输入、手势）。按键过滤只在任务进行中临时打开（音量下键停止）。
+     flagInputMethodEditor：像输入法一样往有焦点的输入框里写字（API 33+），给读不到输入框节点的 App（微信）用。 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeNotificationStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagReportViewIds"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagReportViewIds|flagInputMethodEditor"
     android:canPerformGestures="true"
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="true"

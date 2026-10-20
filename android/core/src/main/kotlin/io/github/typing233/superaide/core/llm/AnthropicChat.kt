@@ -56,14 +56,14 @@ class AnthropicChat(
         private set
 
     private val client: AnthropicClient = AnthropicOkHttpClient.builder()
-        .baseUrl(service.baseUrl.trimEnd('/').removeSuffix("/v1"))
+        .baseUrl(service.url.trimEnd('/').removeSuffix("/v1"))
         .apply { if (service.bearer) authToken(key) else apiKey(key) }
         .apply { proxyOf(service.proxy)?.let { proxy(it) } }
         .timeout(Duration.ofMinutes(10))
         .maxRetries(1)
         .build()
 
-    private val official = URI(service.baseUrl).host.orEmpty().endsWith("anthropic.com")
+    private val official = runCatching { URI(service.url).host.orEmpty() }.getOrDefault("").endsWith("anthropic.com")
     private val toolList = tools.map(::toTool)
     private val history = mutableListOf<MessageParam>()
 

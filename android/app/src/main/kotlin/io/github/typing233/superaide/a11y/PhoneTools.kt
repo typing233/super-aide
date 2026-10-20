@@ -15,6 +15,7 @@ import io.github.typing233.superaide.core.llm.Part
 import io.github.typing233.superaide.core.llm.ToolCall
 import io.github.typing233.superaide.core.llm.ToolOutput
 import io.github.typing233.superaide.core.screen.Observation
+import io.github.typing233.superaide.core.screen.Opaque
 import io.github.typing233.superaide.system.Apps
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -64,7 +65,13 @@ class PhoneTools(
 
     private suspend fun observe(screenshot: Boolean): List<Part> {
         val svc = service
-        val r = withContext(Dispatchers.Default) { svc.readScreen() }
+        var r = withContext(Dispatchers.Default) { svc.readScreen() }
+        // 不让无障碍读界面的 App（微信）：不管要不要图都得截一张来认字
+        val front = r.screen.windows.firstOrNull { it.type == "app" && it.active } ?: r.screen.windows.firstOrNull { it.type == "app" }
+        val needsOcr = front != null && !front.blocked && (front.opaque || front.pkg in Opaque.SCRAMBLERS)
+        val cap = if (screenshot || needsOcr) capture(svc, r.screen) else null
+        val shot = cap?.first
+        if (needsOcr) r = withContext(Dispatchers.Default) { Ocr.fill(r, shot, fullScreen = cap?.second == false) }
         read = r
         val screen = r.screen
         val scale = Observation.scaleFor(screen.width, screen.height)
@@ -72,7 +79,7 @@ class PhoneTools(
         val described = o.build(apps::label)
         obs = o
         if (!screenshot) return listOf(text(described))
-        val shot = capture(svc, screen) ?: return listOf(text(described + "\n（这次没截到图：可能是受保护的页面，比如密码、支付）"))
+        if (shot == null) return listOf(text(described + "\n（这次没截到图：可能是受保护的页面，比如密码、支付）"))
         full = shot
         val small = Shots.scaled(shot, scale)
         val boxes = o.refs.take(Observation.LIMIT).mapNotNull { ref ->
@@ -82,13 +89,13 @@ class PhoneTools(
         return listOf(text(described), Part.Image(Shots.jpeg(Shots.annotate(small, boxes))))
     }
 
-    /** 优先只截前台 App 的窗口（我们自己的界面不在上面）；不行再截整屏 */
-    private suspend fun capture(svc: AideAccessibilityService, screen: io.github.typing233.superaide.core.screen.Screen): Bitmap? {
+    /** 优先只截前台 App 的窗口（我们自己的界面不在上面）；不行再截整屏。返回（截图, 是不是只截了那个窗口） */
+    private suspend fun capture(svc: AideAccessibilityService, screen: io.github.typing233.superaide.core.screen.Screen): Pair<Bitmap, Boolean>? {
         val front = screen.windows.firstOrNull { it.type == "app" && it.active }
         if (front != null && front.box.l <= 0 && front.box.t <= 0 && front.box.w >= screen.width && front.box.h >= screen.height) {
-            svc.screenshotOfWindow(front.id)?.let { if (it.width == screen.width) return it }
+            svc.screenshotOfWindow(front.id)?.let { if (it.width == screen.width) return it to true }
         }
-        return svc.screenshot()
+        return svc.screenshot()?.let { it to false }
     }
 
     private fun readText(a: JsonObject): String {
@@ -189,14 +196,31 @@ class PhoneTools(
 
             "type" -> {
                 val text = s.str("text").orEmpty()
-                val node = (if (s.int("id") != null) target(s)?.node else null) ?: svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-                    ?: return Fail("没有输入框：给输入框的 id，或者先点一下输入框")
+                val t = if (s.int("id") != null) target(s) else null
+                // 截图认出的字（没有节点）：先点它，让它所在的输入框拿到焦点
+                if (t != null && t.node == null) { svc.tap(t.point.first, t.point.second); delay(400) }
+                val replace = s.bool("replace") == true
+                val append = s.bool("append") == true
+                val node = t?.node ?: svc.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.refresh() && it.isEditable }
+                if (node == null || !node.isEditable) {
+                    // 读不到输入框节点（微信这样不让读界面的 App）：用无障碍输入法往有焦点的输入框里写
+                    val field = svc.imeField()
+                        ?: return Fail(if (node != null) "[${s.int("id")}] 不是输入框" else "没有输入框：给输入框的 id，或者先点一下输入框（看截图用坐标点）")
+                    guard(field.text, field.multiLine, replace, append)?.let { return Fail(it) }
+                    return svc.imeType(text, replace, s.bool("enter") == true)?.let { typed += text; Ok(it) } ?: Fail("没有获得焦点的输入框：先点一下输入框")
+                }
                 node.refresh()
-                if (!node.isEditable) return Fail("[${s.int("id")}] 不是输入框")
                 val existing = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
-                val value = if (s.bool("replace") == true) text else existing + text
+                if (!node.isPassword) guard(existing, node.isMultiLine, replace, append)?.let { return Fail(it) }
+                typed += text
+                val value = if (replace) text else existing + text
                 val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }
-                if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return Fail("这个输入框不让直接填字")
+                if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                    // 不让直接填字的输入框：点一下让它拿到焦点，再像输入法一样写进去
+                    node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    delay(300)
+                    return svc.imeType(text, replace, s.bool("enter") == true)?.let { Ok(it) } ?: Fail("这个输入框不让直接填字")
+                }
                 delay(150)
                 node.refresh()
                 val now = node.text?.toString().orEmpty()
@@ -263,6 +287,22 @@ class PhoneTools(
 
             else -> Fail("不认识的动作「$d」")
         }
+    }
+
+    /** 这段对话里自己输入过的字：输入框里只有这些的，不算用户的草稿 */
+    private val typed = mutableListOf<String>()
+
+    /**
+     * 输入框里原来就有字时拦一下。多行的（聊天框、正文）里不是自己刚输入的字，多半是用户没发的草稿：
+     * 不清掉、不接在后面（接上再发出去，草稿就替用户发了）。单行的（搜索框）说明要换掉还是接上就行。
+     */
+    private fun guard(existing: String, multiLine: Boolean, replace: Boolean, append: Boolean): String? {
+        if (existing.isEmpty()) return null
+        val ours = existing == typed.joinToString("") || existing in typed
+        if (multiLine && !ours) return "输入框里有用户没发的草稿「${existing.take(80)}」，这次没有输入。不要清掉、改动它，也不要接在后面发出去：" +
+            "停下来，汇报第一行写「待你确认：」，说输入框里有草稿，请用户先处理（发掉、删掉或者存起来）。"
+        if (!replace && !append) return "输入框里已经有字「${existing.take(80)}」，这次没有输入：要换掉就给 replace=true，要接在后面就给 append=true。"
+        return null
     }
 
     private class Target(val node: AccessibilityNodeInfo?, val point: Pair<Float, Float>, val name: String, val blocked: Boolean = false)

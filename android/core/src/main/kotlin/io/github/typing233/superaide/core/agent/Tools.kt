@@ -71,7 +71,7 @@ object Tools {
     val act = ToolSpec(
         "act",
         "按顺序执行一组动作（失败就停在那一步），默认执行完再观察一次并返回新的截图。\n" +
-            "do 可以是：tap、long_press、double_tap、type（text；replace=true 先清空；enter=true 输完按回车/搜索）、" +
+            "do 可以是：tap、long_press、double_tap、type（text；输入框里已经有字时必须说明：replace=true 先清空，append=true 接在后面，聊天框里用户没发的草稿不能动；enter=true 输完按回车/搜索）、" +
             "scroll（direction=up/down/left/right，amount 屏数）、swipe（x,y → to_x,to_y）、" +
             "back、home、recents、notifications、wait（seconds）、wait_for（text 出现，最多 seconds 秒）、" +
             "open_app（app：名字或包名）、open_url（url，也可以是 App 自带的链接）。\n" +
@@ -81,7 +81,7 @@ object Tools {
                "do":{"type":"string","enum":["tap","long_press","double_tap","type","scroll","swipe","back","home","recents",
                      "notifications","wait","wait_for","open_app","open_url"]},
                "id":{"type":"integer"},"x":{"type":"integer"},"y":{"type":"integer"},"to_x":{"type":"integer"},"to_y":{"type":"integer"},
-               "text":{"type":"string"},"replace":{"type":"boolean"},"enter":{"type":"boolean"},
+               "text":{"type":"string"},"replace":{"type":"boolean"},"append":{"type":"boolean"},"enter":{"type":"boolean"},
                "direction":{"type":"string","enum":["up","down","left","right"]},"amount":{"type":"number"},
                "seconds":{"type":"number"},"app":{"type":"string"},"url":{"type":"string"}},"required":["do"]}},
                "observe_after":{"type":"boolean","default":true}},"required":["actions"]}"""

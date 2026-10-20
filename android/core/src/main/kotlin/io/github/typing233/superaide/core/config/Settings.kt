@@ -32,10 +32,16 @@ data class Settings(
     val shadowDaily: Int = 20,
     val setupDone: Boolean = false,
     val tourDone: Boolean = false,
+    /** 设置格式的版本：旧版本读进来时做一次迁移（[migrate]） */
+    val schema: Int = 0,
 ) {
     fun service(id: String) = services.firstOrNull { it.id == id }
 
+    /** 旧设置升级：0.5.2 及以前按名字猜 DeepSeek 不收图片（猜错了，比如 deepseek-flash 收），一律改回收图，真不收的用的时候会自己发现 */
+    fun migrate(): Settings = if (schema >= SCHEMA) this else copy(models = models.map { it.copy(vision = true) }, schema = SCHEMA)
+
     companion object {
+        const val SCHEMA = 1
         val DEFAULT_BLOCKED = listOf(
             "com.x8bit.bitwarden",
             "com.agilebits.onepassword",

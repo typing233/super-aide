@@ -102,6 +102,36 @@ class OpenAiChatTest {
         assertEquals("model_not_found", e.type)
     }
 
+    @Test fun modelThatRejectsImagesIsRetriedWithoutThemAndRemembered() = runTest {
+        server.enqueue(MockResponse.Builder().code(400)
+            .body("""{"error":{"message":"unknown variant `image_url`, expected `text`","type":"invalid_request_error"}}""").build())
+        server.enqueue(sse("""{"model":"m1","choices":[{"delta":{"content":"好"},"finish_reason":"stop"}]}""", "[DONE]"))
+        val noted = mutableListOf<String>()
+        Chats.onNoVision = { service, model -> noted += "$service/$model" }
+        try {
+            val r = chat(Wire.OPENAI_CHAT).send(TurnInput.User(listOf(Part.Image(byteArrayOf(1)), Part.Text("这是什么")))) {}
+            assertEquals("好", r.text)
+        } finally {
+            Chats.onNoVision = null
+        }
+        assertEquals(listOf("s/m1"), noted)
+        assertTrue("image_url" in server.takeRequest().body!!.utf8())
+        val retried = server.takeRequest().body!!.utf8()
+        assertFalse("image_url" in retried)
+        assertTrue("截图略" in retried)
+    }
+
+    @Test fun otherBadRequestsAreNotRetried() = runTest {
+        server.enqueue(MockResponse.Builder().code(400).body("""{"error":{"message":"max_tokens too large"}}""").build())
+        assertFailsWith<ModelError> { chat(Wire.OPENAI_CHAT).send(TurnInput.User(listOf(Part.Image(byteArrayOf(1)), Part.Text("hi")))) {} }
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun bareDomainGetsHttps() {
+        assertEquals("https://api.example.com/v1", Service("s", "s", Wire.OPENAI_CHAT, " api.example.com/v1 ").url)
+        assertEquals("http://127.0.0.1:8080", Service("s", "s", Wire.OPENAI_CHAT, "http://127.0.0.1:8080").url)
+    }
+
     @Test fun streamErrorEventBecomesModelError() = runTest {
         server.enqueue(sse("""{"type":"error","code":"overloaded","message":"busy"}"""))
         val e = assertFailsWith<ModelError> { chat(Wire.OPENAI_RESPONSES).send(TurnInput.User(listOf(Part.Text("hi")))) {} }
