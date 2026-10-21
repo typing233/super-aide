@@ -16,6 +16,11 @@ import io.github.typing233.superaide.a11y.Shots
 import io.github.typing233.superaide.assist.AideSession
 import io.github.typing233.superaide.assist.AideVoiceInteractionService
 import io.github.typing233.superaide.core.agent.Mode
+import io.github.typing233.superaide.core.agent.ToolHost
+import io.github.typing233.superaide.core.files.Workspace
+import io.github.typing233.superaide.core.llm.ToolCall
+import io.github.typing233.superaide.core.llm.ToolOutput
+import io.github.typing233.superaide.core.work.WorkTools
 import io.github.typing233.superaide.core.events.Event
 import io.github.typing233.superaide.core.i18n.I18n
 import io.github.typing233.superaide.core.i18n.tr
@@ -37,8 +42,11 @@ import io.github.typing233.superaide.core.session.Session
 import io.github.typing233.superaide.data.History
 import io.github.typing233.superaide.diag.Diag
 import io.github.typing233.superaide.host.AssistActivity
+import io.github.typing233.superaide.host.ChatActivity
 import io.github.typing233.superaide.system.Apps
 import io.github.typing233.superaide.system.Device
+import io.github.typing233.superaide.work.AndroidPlatform
+import io.github.typing233.superaide.work.FileActions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +59,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 
 /**
  * 运行中的超级助手：召唤、抓屏、对话、停止、「让我来做」。界面（宿主和浮层）只订阅这里的状态。
@@ -76,6 +85,13 @@ object Aide {
     val mode: StateFlow<Mode> = _mode
     /** 设置页在前台：悬浮球先藏起来（免得挡住右边的开关） */
     val settingsOpen = MutableStateFlow(false)
+    /** 对话页在前台（悬浮球也藏起来；答完不用再发通知） */
+    val chatOpen = MutableStateFlow(false)
+    private val _attachments = MutableStateFlow<List<File>>(emptyList())
+    /** 还没发出去的附件（先拷在 cache/attach/ 里，发问时挪进这段对话的工作区） */
+    val attachments: StateFlow<List<File>> = _attachments
+    /** 分享进来的文字：对话页的输入框拿去当草稿 */
+    val draft = MutableStateFlow<String?>(null)
 
     private var capture: Deferred<Capture>? = null
     private var session: Session? = null
@@ -84,6 +100,8 @@ object Aide {
     private var frontApp = ""
     private var job: Job? = null
     private var tools: PhoneTools? = null
+    /** 这段对话的工作区和联网、文件、跑代码的工具 */
+    private var work: WorkTools? = null
     private var lastActive = 0L
     /** 用户按了停止：工具每一步前都看它 */
     @Volatile
@@ -208,13 +226,12 @@ object Aide {
         Capture(screen, shot)
     }
 
-    /** 输入框里按了发送 */
-    fun submit(text: String) {
-        val question = text.trim()
-        if (question.isEmpty()) return
+    /** 输入框里按了发送。fromChat = 在对话页里问的（不读屏幕：屏幕上是我们自己） */
+    fun submit(text: String, fromChat: Boolean = false) {
+        val question = text.trim().ifEmpty { if (fromChat && _attachments.value.isNotEmpty()) tr("看看这些文件") else return }
         val current = _card.value
-        val followup = current != null && session != null && current.mode == _mode.value && !current.running && hasRecent() &&
-            _surface.value == Surface.CARD
+        val followup = current != null && session != null && current.mode == _mode.value && !current.running &&
+            (fromChat || hasRecent() && _surface.value == Surface.CARD)
         if (followup && Routing.NEGATIVE.containsMatchIn(question)) {
             routing.record(lastDecision, 0.0, "negative_followup")
             experience.failed(turnLessons)
@@ -225,7 +242,7 @@ object Aide {
             routing.record(lastDecision, 0.0, "reask")
         }
         if (!followup) newConversation(_mode.value)
-        run(question, followup)
+        run(question, followup, fromChat = fromChat)
     }
 
     /** 「让我来做」：新开一段操作对话，带上刚才的问答 */
@@ -233,30 +250,102 @@ object Aide {
         val c = _card.value ?: return
         _mode.value = Mode.ACT
         val q = Prompts.handOff(c.question, c.answer)
-        newConversation(Mode.ACT)
+        newConversation(Mode.ACT, keepFiles = true)
         run(q, followup = false, display = tr("照刚才说的帮我做"))
     }
 
-    private fun newConversation(mode: Mode) {
+    /** keepFiles：「让我来做」接着用刚才问答的工作区（刚生成的文件还要用） */
+    private fun newConversation(mode: Mode, keepFiles: Boolean = false) {
         job?.cancel()
         learnJob?.cancel()
         seenLessons.clear()
         turnLessons = emptyList()
         negative = false
+        conversationTime = System.currentTimeMillis()
+        conversationId = "c" + conversationTime
         val t = PhoneTools(apps, recall = ::recallTool, isStopped = { stopRequested })
         tools = t
+        val w = work?.takeIf { keepFiles } ?: WorkTools(Workspace(File(app.filesDir, "work/$conversationId")), AndroidPlatform(app), onFile = { f ->
+            // 网上下载的（web/）是给模型读的，不摆到回答下面
+            if (!f.path.startsWith("${Workspace.WEB}/")) onEvent(Event.file(f.path, f.bytes))
+        }, log = { event, detail -> Diag.log(event, detail) })
+        work = w
         session = Session(
             mode = mode,
-            tools = t,
+            tools = Hosts(w, t),
             pick = { exclude -> task?.let { routing.choices(it, exclude) } ?: emptyList() },
             sideline = routing::sideline,
             emit = ::onEvent,
             uiLang = ::uiLang,
         )
-        conversationTime = System.currentTimeMillis()
-        conversationId = "c" + conversationTime
         escalateNext = false
         _card.value = CardState(mode)
+    }
+
+    /** 联网、文件、跑代码的归 WorkTools，看屏幕、操作手机的归 PhoneTools */
+    private class Hosts(val work: WorkTools, val phone: PhoneTools) : ToolHost {
+        override suspend fun run(call: ToolCall, mode: Mode): ToolOutput = work.run(call) ?: phone.run(call, mode)
+    }
+
+    /** 对话页的「新对话」：下一句不再当追问 */
+    fun newChat() {
+        if (_card.value?.running == true) return
+        save()
+        session = null
+        _card.value = null
+        if (_surface.value == Surface.CARD) _surface.value = Surface.HIDDEN
+    }
+
+    /** 在对话页里看这段对话（卡片上点了展开、通知点开） */
+    fun openChat(context: Context) {
+        tools?.clearMarks()
+        if (_surface.value == Surface.CARD || _surface.value == Surface.INPUT) _surface.value = Surface.HIDDEN
+        context.startActivity(Intent(context, ChatActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+    }
+
+    /** 界面上显示的文件（相对这段对话的工作区） */
+    fun fileFor(path: String): File? = runCatching { work?.workspace?.resolve(path) }.getOrNull()?.takeIf { it.isFile }
+
+    /** 分享进来的、选好的文件：先放着，发问时一起发 */
+    fun attach(context: Context, uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        app.scope.launch(Dispatchers.IO) {
+            val dir = File(app.cacheDir, "attach").apply { mkdirs() }
+            val added = FileActions.import(context, uris, dir)
+            _attachments.value = (_attachments.value + added).distinctBy { it.path }
+        }
+    }
+
+    fun detach(f: File) {
+        _attachments.value = _attachments.value - f
+        f.delete()
+    }
+
+    /** 附件挪进工作区的 inbox/，返回相对路径 */
+    private fun moveIn(w: WorkTools, files: List<File>): List<String> = files.mapNotNull { f ->
+        if (!f.isFile) return@mapNotNull null
+        val target = w.workspace.unique(Workspace.INBOX, f.name)
+        if (!f.renameTo(target)) { f.copyTo(target, overwrite = true); f.delete() }
+        w.workspace.relative(target)
+    }
+
+    /** 附件拼进首条消息：每个文件带上开头一段（一共最多 3 万字），图片直接附上 */
+    private suspend fun describe(w: WorkTools, paths: List<String>): Pair<String, List<Part.Image>> {
+        if (paths.isEmpty()) return "" to emptyList()
+        val images = mutableListOf<Part.Image>()
+        val sb = StringBuilder()
+        var budget = 30_000
+        for (p in paths) {
+            if (budget < 1000) { sb.append("- ").append(p).append("（没带上内容，用 read_file 读）\n"); continue }
+            val parts = runCatching { w.readFile(p, 0, minOf(12_000, budget)) }.getOrElse { listOf(Part.Text("文件：$p（读不了：${it.message}）")) }
+            val text = parts.filterIsInstance<Part.Text>().joinToString("\n") { it.text }
+            images += parts.filterIsInstance<Part.Image>()
+            sb.append("<file path=\"").append(p).append("\">\n").append(text).append("\n</file>\n")
+            budget -= text.length
+        }
+        if (images.isNotEmpty()) sb.append("（图片按顺序附在消息里，在屏幕截图后面。）\n")
+        sb.append("（文件都在工作区的 inbox/ 里。只带了开头一部分的，用 read_file 加 start 接着读完再回答。）")
+        return sb.toString() to images
     }
 
     /**
@@ -289,24 +378,35 @@ object Aide {
         }
     }
 
-    private fun run(question: String, followup: Boolean, display: String = question, envOverride: String? = null) {
+    private fun run(question: String, followup: Boolean, display: String = question, envOverride: String? = null, fromChat: Boolean = false) {
         val s = session ?: return
-        val state = (_card.value ?: CardState(s.mode)).next(display)
+        val w = work ?: return
+        // 附件只在对话页里加、也只跟对话页里的提问一起发（召唤卡片上看不到它们）
+        val files = if (fromChat) _attachments.value else emptyList()
+        if (fromChat) _attachments.value = emptyList()
+        val state = (_card.value ?: CardState(s.mode)).next(display, files.map { it.name })
         _card.value = state
         stopRequested = false
         lastActive = System.currentTimeMillis()
-        if (s.mode == Mode.ACT) _surface.value = Surface.PILL else _surface.value = Surface.CARD
+        // 对话页里问的：回答就在对话页上，不弹卡片
+        _surface.value = if (s.mode == Mode.ACT) Surface.PILL else if (fromChat) Surface.HIDDEN else Surface.CARD
+        // 界面还看得见的时候启动前台服务：收起卡片、切到别的 App 以后任务接着跑
+        TaskService.start(app)
+        TaskNotice.clearDone(app)
         job = app.scope.launch {
             try {
-                // 读完整页时环境已经是翻完读到的全文，不再截一次（这时屏幕上大半是我们自己的卡片）
+                // 读完整页时环境已经是翻完读到的全文，不再截一次（这时屏幕上大半是我们自己的卡片）；对话页里问的不读屏幕
                 val cap = when {
-                    envOverride != null -> Capture(null, null)
+                    envOverride != null || fromChat -> Capture(null, null, source = if (fromChat) "chat" else "fullpage")
                     followup -> withContext(Dispatchers.Default) { recapture() }
                     else -> capture?.await() ?: Capture(null, null)
                 }
                 frontApp = cap.screen?.windows?.firstOrNull { it.type == "app" }?.pkg ?: frontApp
-                val env = envOverride ?: cap.screen?.let { EnvText.render(it, EnvText.Extras(apps::label, Device.line(app), cap.clipboard)) }
-                    ?: tr("（没有读到屏幕：无障碍服务没开，或者是受保护的页面）")
+                val extras = EnvText.Extras(apps::label, Device.line(app), cap.clipboard)
+                val env = envOverride ?: cap.screen?.let { EnvText.render(it, extras) }
+                    ?: EnvText.bare(System.currentTimeMillis(), extras,
+                        if (fromChat) "（用户在超级助手自己的对话页里提问：没有别的 App 的屏幕。）" else "（没有读到屏幕：无障碍服务没开，或者是受保护的页面）")
+                val (attached, attachedImages) = describe(w, withContext(Dispatchers.IO) { moveIn(w, files) })
                 // 问答第一轮：列表只加载了一部分，答完给一个「读完整页」。不让无障碍读界面的 App 只认得出屏幕上看得到的字，也给
                 val frontWindow = cap.screen?.windows?.firstOrNull { it.type == "app" }
                 val lists = if (s.mode == Mode.ASK && !followup) frontWindow?.partialLists().orEmpty() else emptyList()
@@ -314,7 +414,7 @@ object Aide {
                 val partial = lists.isNotEmpty() || opaque
                 val images = listOfNotNull(cap.shot?.let { Part.Image(it) })
                 val notes = buildList {
-                    if (cap.screen == null && envOverride == null) add("这次没能读取屏幕内容（无障碍服务没开）。需要看屏幕才能回答的，请让用户在设置里打开超级助手的无障碍权限。")
+                    if (cap.screen == null && envOverride == null && !fromChat) add("这次没能读取屏幕内容（无障碍服务没开）。需要看屏幕才能回答的，请让用户在设置里打开超级助手的无障碍权限。")
                 }.toMutableList()
                 lists.firstOrNull()?.let { (total, loaded) ->
                     notes += "屏幕上的列表只加载了一部分（列表报告共 $total 项，现在读到 $loaded 项；总数常把分隔线、分组标题这类没有文字的项也算进去）。用户要的是完整内容时，请用户点回答下面的「读完整页」，" +
@@ -338,7 +438,7 @@ object Aide {
                 turnLessons = lessons.map { it.id }
                 seenLessons += turnLessons
                 if (lessons.isNotEmpty()) Diag.log("recall", lessons.joinToString { it.title })
-                val r = s.ask(question, env, images, notes, Recall.render(lessons))
+                val r = s.ask(question, env, images, notes, Recall.render(lessons), attached, attachedImages)
                 if (partial) _card.value = _card.value?.copy(fullPage = true)
                 learn(s, question, followup, r.tools, env)
             } catch (e: CancellationException) {
@@ -375,6 +475,9 @@ object Aide {
         lastActive = System.currentTimeMillis()
         if (e.type == "done") {
             Diag.log("turn.done", e.data.toString())
+            // 问答答完时用户没在看（卡片收起了、去了别的 App）：发一条通知，点开就是对话页
+            val c = _card.value
+            if (c != null && c.mode == Mode.ASK && !c.stopped && _surface.value != Surface.CARD && !chatOpen.value) runCatching { TaskNotice.done(app, c) }
             // 操作完成：进度条变成结果提示，过一会儿收起
             if (_card.value?.mode == Mode.ACT && _surface.value == Surface.PILL) app.scope.launch {
                 delay(RESULT_MS)

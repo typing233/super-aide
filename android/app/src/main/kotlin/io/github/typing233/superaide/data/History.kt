@@ -46,12 +46,16 @@ class History(context: Context) {
         File(dir, "trash/$id.json").renameTo(File(dir, "$id.json"))
     }
 
+    /** 连同这段对话的工作区（用户给的、生成的文件）一起删 */
     fun purge(id: String) {
         File(dir, "trash/$id.json").delete()
+        File(work, id).deleteRecursively()
     }
 
     /** 上次没来得及清的（撤销倒计时里 App 被关了）：打开历史页时清掉 */
     fun purgeAll() {
-        File(dir, "trash").listFiles()?.forEach { it.delete() }
+        File(dir, "trash").listFiles()?.forEach { it.delete(); File(work, it.name.removeSuffix(".json")).deleteRecursively() }
     }
+
+    private val work = File(context.filesDir, "work")
 }

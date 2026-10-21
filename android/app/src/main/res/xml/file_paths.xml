@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 只放出对话工作区（files/work/）：助手生成的文件、用户给的文件 -->
+<paths>
+    <files-path name="work" path="work/" />
+</paths>

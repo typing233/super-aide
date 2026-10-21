@@ -36,3 +36,10 @@
 -keep class com.google.android.gms.internal.mlkit_vision_common.** { *; }
 -keep class com.google.android.gms.internal.mlkit_common.** { *; }
 -keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); *; }
+
+# run_js 沙箱：页面里的 JS 按名字调 JsSandbox.Bridge 的方法（log / call / done），R8 改名就调不到了
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+-keepattributes JavascriptInterface
+# jsoup 的可选依赖（正则引擎 re2j）安卓上没有，我们不用
+-dontwarn com.google.re2j.**
+-dontwarn org.jspecify.annotations.**

@@ -12,6 +12,9 @@ import io.github.typing233.superaide.core.llm.TurnInput
 import io.github.typing233.superaide.core.llm.Usage
 import io.github.typing233.superaide.core.prompts.Prompts
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 /** 一轮（用户说一句 → 模型答完）的结果。 */
 data class TurnResult(
@@ -37,7 +40,7 @@ class Agent(
     private val tools: ToolHost,
     val mode: Mode,
     private val emit: (Event) -> Unit,
-    private val maxSteps: Int = if (mode == Mode.ACT) 80 else 25,
+    private val maxSteps: Int = if (mode == Mode.ACT) 80 else 40,
 ) {
     /** 用户按了停止：当前工具做完就不再往下做 */
     @Volatile
@@ -85,13 +88,19 @@ class Agent(
             }
             pending = turn.calls
             done.clear()
-            for (call in turn.calls) {
-                if (stopped) break
-                val line = Tools.status(call)
-                trace += line
-                emit(Event.status(line, tool = call.name))
-                done += run(call)
-                toolCount++
+            // 连着的几个联网、读文件这类调用一起跑；看屏幕、操作手机的一个一个来
+            val calls = turn.calls
+            var i = 0
+            while (i < calls.size && !stopped) {
+                val batch = if (calls[i].name in Tools.parallel) calls.drop(i).takeWhile { it.name in Tools.parallel } else listOf(calls[i])
+                for (call in batch) {
+                    val line = Tools.status(call)
+                    trace += line
+                    emit(Event.status(line, tool = call.name))
+                }
+                done += if (batch.size == 1) listOf(run(batch[0])) else coroutineScope { batch.map { async { run(it) } }.awaitAll() }
+                toolCount += batch.size
+                i += batch.size
             }
             if (stopped) {
                 return TurnResult(turn.text, ok = false, stopped = true, tools = toolCount, trace = trace, usage = usage, model = turn.model)

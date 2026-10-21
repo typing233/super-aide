@@ -3,8 +3,19 @@ package io.github.typing233.superaide.core.session
 import io.github.typing233.superaide.core.agent.Mode
 import io.github.typing233.superaide.core.events.Event
 
+/** 助手在工作区里生成的文件（path 相对工作区） */
+data class FileRef(val path: String, val bytes: Long) {
+    val name get() = path.substringAfterLast('/')
+}
+
 /** 一问一答（界面上的一轮）。 */
-data class Exchange(val question: String, val answer: String, val ok: Boolean)
+data class Exchange(
+    val question: String,
+    val answer: String,
+    val ok: Boolean,
+    val files: List<FileRef> = emptyList(),
+    val attachments: List<String> = emptyList(),
+)
 
 /**
  * 回答卡片的状态：收到一个事件就算出新状态（和桌面版 ui/web/app.js 处理事件的方式一样）。
@@ -35,6 +46,10 @@ data class CardState(
     val rating: Int = 0,
     /** 屏幕上的列表只加载了一部分：问答答完后给一个「读完整页」 */
     val fullPage: Boolean = false,
+    /** 这一轮生成的文件 */
+    val files: List<FileRef> = emptyList(),
+    /** 这一问附带的文件名 */
+    val attachments: List<String> = emptyList(),
 ) {
     fun reduce(e: Event): CardState = when (e.type) {
         "route" -> copy(route = listOfNotNull(e.data["model"], e.data["effort"]).joinToString(" · "))
@@ -42,6 +57,7 @@ data class CardState(
         "new_message", "retract" -> copy(answer = "")
         "delta" -> copy(answer = answer + e.text, transient = null)
         "error" -> copy(error = e.text)
+        "file" -> copy(files = files.filterNot { it.path == e.text } + FileRef(e.text, (e.data["bytes"] as? Long) ?: 0L))
         "done" -> {
             val ok = e.data["ok"] == true
             copy(
@@ -59,13 +75,17 @@ data class CardState(
     }
 
     /** 新一轮追问：把这一轮收进 earlier */
-    fun next(question: String): CardState = CardState(
+    fun next(question: String, attachments: List<String> = emptyList()): CardState = CardState(
         mode = mode,
         question = question,
-        earlier = if (this.question.isBlank()) earlier else earlier + Exchange(this.question, answer, ok),
+        earlier = if (this.question.isBlank()) earlier else earlier + Exchange(this.question, answer, ok, files, this.attachments),
         running = true,
         route = route,
+        attachments = attachments,
     )
+
+    /** 整段对话里生成过的文件（新的在后） */
+    fun allFiles(): List<FileRef> = (earlier.flatMap { it.files } + files).reversed().distinctBy { it.path }.reversed()
 
     /** 结果的一行摘要（收起后的小条、操作完成的提示） */
     fun summary(): String {

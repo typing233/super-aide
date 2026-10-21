@@ -3,6 +3,8 @@
   python scripts/android/device_test.py setup            装最新调试版、开无障碍、设默认助手、写入电脑上的模型服务
   python scripts/android/device_test.py cmd dump         发调试命令（dump / shot / probe / overlay / session / ask / act / stop）
   python scripts/android/device_test.py ask "这是什么？"  问一句，等答完把结果打出来（act 同理）
+  python scripts/android/device_test.py chat "查一下…"     在对话页里问（不读屏幕；--show 打开对话页）
+  python scripts/android/device_test.py setup --keep-assistant   同上，但不改手机的默认助手
   python scripts/android/device_test.py log [N]          看最近 N 条日志
 
 结果都来自 App 的诊断日志 files/debug/log.jsonl（经 run-as 读，只有调试版能读）。
@@ -85,11 +87,13 @@ def setup() -> None:
         services.append(A11Y)
         adb("shell", "settings", "put", "secure", "enabled_accessibility_services", ":".join(services))
         adb("shell", "settings", "put", "secure", "accessibility_enabled", "1")
-    role = adb("shell", "cmd", "role", "add-role-holder", "android.app.role.ASSISTANT", PKG, check=False)
-    print("默认助手：", (role.strip() or "已设置"))
+    if "--keep-assistant" not in sys.argv:
+        role = adb("shell", "cmd", "role", "add-role-holder", "android.app.role.ASSISTANT", PKG, check=False)
+        print("默认助手：", (role.strip() or "已设置"))
     adb("shell", "monkey", "-p", PKG, "-c", "android.intent.category.LAUNCHER", "1", check=False)
     time.sleep(2)
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "android" / "provision.py"), "--package", PKG], check=True)
+    extra = ["--deepseek"] if "--deepseek" in sys.argv else []
+    subprocess.run([sys.executable, str(ROOT / "scripts" / "android" / "provision.py"), "--package", PKG, *extra], check=True)
     time.sleep(1)
     show([e for e in log_lines()[-8:]])
 
@@ -103,10 +107,10 @@ def main() -> int:
         setup()
     elif what == "log":
         show(log_lines()[-int(sys.argv[2]) if len(sys.argv) > 2 else -30:])
-    elif what in ("ask", "act"):
+    elif what in ("ask", "act", "chat"):
         before = len(log_lines())
         broadcast(what, sys.argv[2], {"show": "1"} if "--show" in sys.argv else None)
-        show(wait_for(f"debug.{what}.result", before, 300))
+        show(wait_for(f"debug.{what}.result", before, 600 if what == "chat" else 300))
     elif what == "cmd":
         before = len(log_lines())
         broadcast(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "")

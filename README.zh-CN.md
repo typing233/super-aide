@@ -136,11 +136,13 @@ https://github.com/user-attachments/assets/3c84873e-12d7-41b2-b592-83ed046d6131
 
 ## 安卓版
 
-手机上也能用：**[下载 `SuperAide.apk`](https://github.com/typing233/super-aide/releases/latest/download/SuperAide.apk)**（安卓 11 及以上，约 4 MB）。
+手机上也能用：**[下载 `SuperAide.apk`](https://github.com/typing233/super-aide/releases/latest/download/SuperAide.apk)**（安卓 11 及以上，约 15 MB）。
 
 - **安装**：在手机上打开 APK 装好。打开 App，在「模型服务」里加一个服务（Anthropic、OpenAI 兼容或 DeepSeek：地址和 key，可以点测试），再打开无障碍。从浏览器装的，安卓 13 起要先在「应用信息」右上角的三个点里选**允许受限设置**，才能开无障碍。
 - **召唤**：悬浮球（点一下问，长按直接做）、通知栏快捷开关，或者在「设置 → 应用 → 默认应用 → 数字助理应用」里选超级助手。
 - **问 / 做**和电脑上一样：读出屏幕上每个窗口的原文，回答你，或者替你点、替你输入。输入框左边点一下切换；回答里说要动手的，点**让我来做**。正在做的事，点进度条上的停止键或通知里的「停止」就停。
+- **联网、文件、跑代码**：和 Claude Code、Codex 一样，会自己上网搜索（百度、必应，不用 key）、打开网页读全文（包括 PDF、要 JS 渲染的页面），能读你给的 PDF、Word、Excel、PPT、图片（扫描件也能认字），能生成 Word、Excel、PDF 等文件（点一下打开、分享或存到「下载」），算账、处理数据时在隔离的沙箱里跑代码。用哪家模型都行（包括 DeepSeek）。
+- **对话页**：App 首页点「问点什么…」，或者在卡片右上角点展开，进全屏对话页，长任务、长回答在这里看；回形针加文件，也可以在别的 App 里把文件分享给超级助手。卡片收起、切到别的 App 以后任务接着跑，答好了发通知，点开就是结果。
 - 智能路由、后台对比、经验库和电脑版一样会学习；自我改进只在电脑上有。
 - **更新**：设置 → 版本。有的手机清理后台会顺手把无障碍关掉：电脑上执行一次 `adb shell pm grant io.github.typing233.superaide android.permission.WRITE_SECURE_SETTINGS`，之后它会自己打开回来。
 

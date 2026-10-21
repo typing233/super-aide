@@ -158,6 +158,46 @@ class DebugReceiver : BroadcastReceiver() {
                 )
             }
 
+            // 对话页里问（不读屏幕），arg 是问题；show=1 时把对话页打开。files/debug/attach/ 里的文件当附件一起发
+            "chat" -> {
+                if (show) withContext(Dispatchers.Main) { Aide.openChat(context) }
+                File(app.filesDir, "debug/attach").listFiles()?.takeIf { it.isNotEmpty() }?.let { files ->
+                    Aide.attach(context, files.map { android.net.Uri.fromFile(it) })
+                    withTimeoutOrNull(10_000) { Aide.attachments.first { it.size >= files.size } }
+                    files.forEach { it.delete() }
+                }
+                // arg 以 act: 开头：用「做」模式
+                val q = arg.removePrefix("act:")
+                Aide.setMode(if (arg.startsWith("act:")) Mode.ACT else Mode.ASK)
+                Aide.submit(q, fromChat = true)
+                val c = withTimeoutOrNull(10 * 60_000L) { Aide.card.first { it?.done == true && it.question == q.ifBlank { it.question } } }
+                Diag.log(
+                    "debug.chat.result",
+                    "ok=${c?.ok} stopped=${c?.stopped} route=${c?.route} steps=${c?.steps} files=${c?.files?.map { it.path }} " +
+                        "attachments=${c?.attachments} error=${c?.error ?: c?.reported}\n${c?.answer}",
+                )
+            }
+
+            // 用联网工具的 HTTP 客户端取一个网址，原样存到 files/debug/get.html
+            "get" -> {
+                val r = io.github.typing233.superaide.core.web.Web().get(arg)
+                File(app.filesDir, "debug/get.html").apply { parentFile?.mkdirs() }.writeBytes(r.bytes)
+                Diag.log("debug.get.result", "status=${r.status} type=${r.type} bytes=${r.bytes.size} url=${r.url}")
+            }
+
+            // 直接在 JS 沙箱里跑一段代码（验证超时、断网）
+            "js" -> {
+                val files = object : io.github.typing233.superaide.core.work.JsFiles {
+                    override suspend fun read(path: String) = "content of $path"
+                    override suspend fun write(path: String, text: String) = "wrote $path"
+                }
+                val started = System.currentTimeMillis()
+                val r = io.github.typing233.superaide.work.JsSandbox.run(context, arg, 3_000, files)
+                Diag.log("debug.js.result", "ms=${System.currentTimeMillis() - started} error=${r.error}\n${r.output}")
+            }
+
+            "newchat" -> { Aide.newChat(); Diag.log("debug.newchat.result", "card=${Aide.card.value}") }
+
             "stop" -> Aide.stop()
 
             // 点「读完整页」，等重新回答完

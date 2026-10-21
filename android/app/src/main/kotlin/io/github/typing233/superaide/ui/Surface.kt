@@ -102,23 +102,34 @@ fun AideSurface(onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * 输入框。chat = 在对话页里（发问时不读屏幕；左边多一个回形针选文件，上面列出还没发的附件）。
+ */
 @Composable
-fun InputBar(mode: Mode, running: Boolean, followup: Boolean, recent: Boolean) {
+fun InputBar(mode: Mode, running: Boolean, followup: Boolean, recent: Boolean, chat: Boolean = false, onAttach: (() -> Unit)? = null,
+             autoFocus: Boolean = true) {
     val t = LocalTokens.current
     var text by rememberSaveable { mutableStateOf("") }
+    val attachments by Aide.attachments.collectAsState()
+    val draft by Aide.draft.collectAsState()
+    LaunchedEffect(draft) { draft?.let { if (chat) { text = if (text.isBlank()) it else "$text\n$it"; Aide.draft.value = null } } }
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    LaunchedEffect(Unit) { if (autoFocus) runCatching { focus.requestFocus() } }
     val shape = RoundedCornerShape(Radius.input)
+    val canSend = (text.isNotBlank() || chat && attachments.isNotEmpty()) && !running
     val send = {
-        if (text.isNotBlank() && !running) { Aide.submit(text); text = "" }
+        if (canSend) { Aide.submit(text, fromChat = chat); text = "" }
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (recent) Chip(tr("接着刚才的问")) { Aide.restore() }
+        if (chat) AttachmentChips(attachments, Aide::detach)
         Row(
             Modifier.fillMaxWidth().shadow(12.dp, shape).clip(shape).background(t.surface).border(1.dp, t.stroke, shape).padding(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ModeChip(mode, enabled = !followup) { Aide.setMode(if (mode == Mode.ASK) Mode.ACT else Mode.ASK) }
+            if (onAttach != null) Icon(AideIcons.attach, tr("加文件"), tint = t.text2,
+                modifier = Modifier.padding(start = 2.dp).size(36.dp).clip(CircleShape).clickable(onClick = onAttach).padding(8.dp))
             BasicTextField(
                 value = text,
                 onValueChange = { text = it },
@@ -134,7 +145,7 @@ fun InputBar(mode: Mode, running: Boolean, followup: Boolean, recent: Boolean) {
                 },
             )
             if (running) RoundButton(t.err, onClick = Aide::stop) { Box(Modifier.size(10.dp).background(Color.White, RoundedCornerShape(2.dp))) }
-            else RoundButton(null, mode, enabled = text.isNotBlank(), onClick = send) {
+            else RoundButton(null, mode, enabled = canSend, onClick = send) {
                 Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White, modifier = Modifier.size(16.dp))
             }
         }
@@ -193,6 +204,9 @@ fun AnswerCard(c: CardState, modifier: Modifier = Modifier) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(c.route, color = t.text3, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            val context = LocalContext.current
+            Icon(AideIcons.expand, tr("在对话页里看"), tint = t.text3,
+                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { Aide.openChat(context) }.padding(9.dp))
             Icon(Icons.Filled.Close, tr("关闭"), tint = t.text3,
                 modifier = Modifier.size(32.dp).clip(CircleShape).clickable { Aide.close() }.padding(7.dp))
         }
@@ -202,7 +216,10 @@ fun AnswerCard(c: CardState, modifier: Modifier = Modifier) {
                 Text(e.answer, color = t.text2, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
             if (c.question.isNotBlank()) Text(c.question, color = t.text2, fontSize = 13.sp)
+            SentAttachments(c.attachments)
             Steps(c)
+            // 卡片地方小：生成的文件是这一轮的成果，放在回答前面，不用往下翻
+            FileChips(c.files)
             if (c.answer.isNotBlank()) {
                 Markdown(content = c.answer, colors = markdownColor(text = t.text))
             } else if (c.running) {
@@ -217,7 +234,7 @@ fun AnswerCard(c: CardState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Steps(c: CardState) {
+fun Steps(c: CardState) {
     if (c.steps.isEmpty()) return
     val t = LocalTokens.current
     var open by remember { mutableStateOf(false) }
@@ -238,7 +255,8 @@ fun Pulse(text: String) {
 }
 
 @Composable
-private fun Footer(c: CardState) {
+/** chat = 在对话页里：不给「读完整页」（要读的 App 被对话页挡着） */
+fun Footer(c: CardState, chat: Boolean = false) {
     val t = LocalTokens.current
     val context = LocalContext.current
     Row(Modifier.fillMaxWidth().padding(top = 8.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -250,7 +268,7 @@ private fun Footer(c: CardState) {
             context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("answer", c.answer))
         }.padding(horizontal = 8.dp, vertical = 6.dp))
         Spacer(Modifier.weight(1f))
-        if (c.fullPage && !c.handOff) Text(
+        if (c.fullPage && !c.handOff && !chat) Text(
             tr("读完整页"), color = t.accent(Mode.ASK), fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
             modifier = Modifier.clip(CircleShape).background(t.hover).clickable { Aide.readFullPage(context) }
                 .padding(horizontal = 14.dp, vertical = 8.dp),

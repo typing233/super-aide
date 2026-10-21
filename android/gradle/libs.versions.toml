@@ -13,6 +13,7 @@ anthropic = "2.73.0"
 junit = "4.13.2"
 markdown = "0.46.0"
 mlkitTextChinese = "16.0.1"
+jsoup = "1.21.2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -37,6 +38,7 @@ anthropic-java = { module = "com.anthropic:anthropic-java", version.ref = "anthr
 junit = { module = "junit:junit", version.ref = "junit" }
 markdown-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown" }
 mlkit-text-chinese = { module = "com.google.mlkit:text-recognition-chinese", version.ref = "mlkitTextChinese" }
+jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
