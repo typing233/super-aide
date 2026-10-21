@@ -56,6 +56,7 @@ import io.github.typing233.superaide.core.llm.ModelProbe
 import io.github.typing233.superaide.core.llm.Service
 import io.github.typing233.superaide.core.llm.Wire
 import io.github.typing233.superaide.core.router.Report
+import io.github.typing233.superaide.host.ChatActivity
 import io.github.typing233.superaide.run.Aide
 import io.github.typing233.superaide.secure.SecretStore
 import io.github.typing233.superaide.summon.AideTileService
@@ -68,6 +69,7 @@ import io.github.typing233.superaide.ui.SettingsChoice
 import io.github.typing233.superaide.ui.SettingsRow
 import io.github.typing233.superaide.ui.SettingsSection
 import io.github.typing233.superaide.ui.SettingsToggle
+import io.github.typing233.superaide.ui.cardBackground
 import io.github.typing233.superaide.ui.pageBackground
 import io.github.typing233.superaide.update.Updater
 import kotlinx.coroutines.Dispatchers
@@ -131,6 +133,18 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(getString(R.string.app_name), fontSize = 26.sp, fontWeight = FontWeight.SemiBold, color = t.text)
+            // 对话页的入口：长任务、读文件、写文档在那里做
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(cardBackground())
+                    .clickable { startActivity(Intent(this@MainActivity, ChatActivity::class.java)) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(tr("问点什么…"), color = t.text2, fontSize = 16.sp)
+                    Text(tr("能联网查、读你给的文件、写文档和表格、算账"), color = t.text3, fontSize = 12.sp)
+                }
+                Text("›", color = t.text3, fontSize = 20.sp)
+            }
             SettingsSection(tr("召唤方式")) {
                 val a11y by AideAccessibilityService.running.collectAsState()
                 val route = remember(life) { AssistantRoute.status(this@MainActivity) }

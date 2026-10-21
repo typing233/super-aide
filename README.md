@@ -123,11 +123,13 @@ A custom endpoint is written into each tool's own config (with a `*.super-aide.b
 
 ## Android
 
-There's also a phone version: **[download `SuperAide.apk`](https://github.com/typing233/super-aide/releases/latest/download/SuperAide.apk)** (Android 11 or later, about 4 MB).
+There's also a phone version: **[download `SuperAide.apk`](https://github.com/typing233/super-aide/releases/latest/download/SuperAide.apk)** (Android 11 or later, about 15 MB).
 
 - **Install**: open the APK on your phone. Then, in the app, add a model service (Anthropic, OpenAI-compatible or DeepSeek: address and key, with a test button) and turn on accessibility. Installed from a browser? Android 13+ asks you to allow it first: App info → three dots at the top right → **Allow restricted settings**.
 - **Summon** it with the floating bubble (tap to ask, long-press to act), the Quick Settings tile, or set it as your **digital assistant app** (Settings → Apps → Default apps).
 - **Ask / Act** work like on the PC: it reads the exact text of every window on screen, answers, or taps and types for you. Tap the chip left of the input box to switch; when an answer says how to do something, tap **Do it for me**. Stop a running task with the button on the progress pill or in the notification.
+- **Web, files and code**: like Claude Code and Codex, it searches the web on its own (Baidu and Bing, no key needed), opens pages and reads them in full (including PDFs and pages that need JavaScript), reads the PDFs, Word, Excel and PowerPoint files and images you give it (scans too, by recognizing the text), creates Word, Excel, PDF and other files (tap to open, share or save to Downloads), and runs code in an isolated sandbox for math and data work. It works with any model you add, DeepSeek included.
+- **Chat page**: tap **Ask anything…** on the app's home screen, or the expand icon on the answer card, for a full-screen conversation that suits long tasks and long answers. Add files with the paper clip, or share them to Super Aide from any app. Tasks keep running after you close the card or switch apps; when an answer is ready you get a notification that opens it.
 - Routing, background comparisons and the lesson library work the same way as on the PC. Self-improvement isn't available on the phone.
 - **Updates**: Settings → Version. Some phones turn accessibility off when the app is force-stopped; run `adb shell pm grant io.github.typing233.superaide android.permission.WRITE_SECURE_SETTINGS` once and it turns itself back on.
 

@@ -88,6 +88,9 @@ class Session(
         images: List<Part.Image>,
         notes: List<String> = emptyList(),
         lessons: List<String> = emptyList(),
+        /** 用户这一问附带的文件（列表和能直接带上的正文）、附带的图片（排在截图后面） */
+        files: String = "",
+        attachedImages: List<Part.Image> = emptyList(),
     ): TurnResult {
         val started = TimeSource.Monotonic.markNow()
         val followup = records.isNotEmpty()
@@ -111,12 +114,12 @@ class Session(
             emit(Event.route(c.service.name, c.model.id, c.effort.wire, c.reason))
             tried += c.model.id
             val text = if (followup && handovers == 0) {
-                Prompts.followup(question, env, images.size, mode, extraNotes, lessons, uiLang())
+                Prompts.followup(question, env, images.size, mode, extraNotes, lessons, uiLang(), files)
             } else {
-                Prompts.first(question, env, images.size, mode, extraNotes, lessons, uiLang())
+                Prompts.first(question, env, images.size, mode, extraNotes, lessons, uiLang(), files)
             }
             try {
-                val parts = images + Part.Text(text)
+                val parts = images + attachedImages + Part.Text(text)
                 if (!followup) firstParts = parts
                 val r = agent!!.turn(parts)
                 return finish(question, started, r, c, trace)

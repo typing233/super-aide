@@ -94,9 +94,73 @@ object Tools {
         schema("""{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}"""),
     )
 
+    // ---- 和 Claude Code / Codex 一样的通用工具：联网、文件、跑代码（core/work/WorkTools.kt） ----
+
+    val webSearch = ToolSpec(
+        "web_search",
+        "联网搜索（百度 + 必应）。返回标题、链接和摘要。新闻、天气、价格、版本号、政策、营业时间这类会变的信息，以及你拿不准的事实，先搜再答。" +
+            "搜索词写得像人搜的那样（关键词，必要时带年份）。要看全文、核对细节用 web_fetch 打开链接。",
+        schema("""{"type":"object","properties":{"query":{"type":"string"},"max_results":{"type":"integer","default":8}},"required":["query"]}"""),
+    )
+
+    val webFetch = ToolSpec(
+        "web_fetch",
+        "打开网址读正文：网页（要 JS 渲染的页面会用内置浏览器打开）、PDF、文本文件。返回标题、最终网址、正文（长的分页读，用 start 接着读）和正文里的链接。" +
+            "PDF 等文件会存进工作区的 web/ 目录。",
+        schema(
+            """{"type":"object","properties":{"url":{"type":"string"},"start":{"type":"integer","default":0},
+               "max_chars":{"type":"integer","default":10000}},"required":["url"]}"""
+        ),
+    )
+
+    val files = ToolSpec(
+        "files",
+        "列出这段对话工作区里的文件：用户给的（inbox/）、你生成的（根目录）、网上下载的（web/）。",
+        schema("""{"type":"object","properties":{}}"""),
+    )
+
+    val readFile = ToolSpec(
+        "read_file",
+        "读工作区里的文件：PDF、Word（docx）、Excel（xlsx）、PowerPoint（pptx）、各种文本和代码；图片会直接给你看，并附上图里认出来的字。长的分页读，用 start 接着读。",
+        schema(
+            """{"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","default":0},
+               "max_chars":{"type":"integer","default":10000}},"required":["path"]}"""
+        ),
+    )
+
+    val writeFile = ToolSpec(
+        "write_file",
+        "在工作区里写文件。写好的文件显示在回答下面，用户点一下就能打开、分享或存到手机。按扩展名：\n" +
+            "- .docx：content 写 Markdown（# 标题、- 列表、| 表格 |、**粗体**），转成 Word；\n" +
+            "- .xlsx：content 写 CSV 或 Markdown 表格，第一行是表头；多张工作表时每张前面一行「## 表名」；= 开头的是公式；转成 Excel；\n" +
+            "- .pdf：content 写 Markdown，排版成 PDF；\n" +
+            "- 其他（.md .txt .csv .html .json .svg .ics …）原样写入，append=true 接在后面。\n" +
+            "同名文件会被覆盖。inbox/ 里是用户的原件，不能改。",
+        schema(
+            """{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"append":{"type":"boolean","default":false}},
+               "required":["path","content"]}"""
+        ),
+    )
+
+    val runJs = ToolSpec(
+        "run_js",
+        "在隔离的 JavaScript 沙箱里运行代码（不能联网，碰不到手机上别的东西）：精确计算、统计、处理表格数据、转换格式、生成文件内容。\n" +
+            "代码在 async 函数里运行，可以 await；console.log 打印的内容和 return 的值会返回给你。\n" +
+            "读写工作区：await files.read(path) 返回文字（docx / xlsx / pdf 返回抽出来的文字，xlsx 是 Markdown 表格）；" +
+            "await files.write(path, text) 写文件（规则和 write_file 一样）。",
+        schema(
+            """{"type":"object","properties":{"code":{"type":"string"},"timeout_seconds":{"type":"integer","default":30}},"required":["code"]}"""
+        ),
+    )
+
+    val work = listOf(webSearch, webFetch, files, readFile, writeFile, runJs)
+
     fun forMode(mode: Mode, withRecall: Boolean = true): List<ToolSpec> =
         (if (mode == Mode.ACT) listOf(observe, act, find, read, zoom, apps, point) else listOf(observe, find, read, zoom, apps, point)) +
-            (if (withRecall) listOf(recall) else emptyList())
+            work + (if (withRecall) listOf(recall) else emptyList())
+
+    /** 不碰屏幕、互不影响的工具：模型一次要调好几个时一起跑 */
+    val parallel = setOf("web_search", "web_fetch", "files", "read_file", "recall")
 
     private val verbs = mapOf(
         "tap" to "正在点击", "long_press" to "正在长按", "double_tap" to "正在双击", "type" to "正在输入",
@@ -116,6 +180,12 @@ object Tools {
             "apps" -> tr("正在查看手机上的 App…")
             "point" -> tr("正在屏幕上圈出位置…")
             "recall" -> tr("正在回想以前的经验…")
+            "web_search" -> tr("正在搜索「{target}」…", "target" to s(a, "query").take(40))
+            "web_fetch" -> tr("正在读网页 {url}…", "url" to host(s(a, "url")))
+            "files" -> tr("正在看工作区里的文件…")
+            "read_file" -> tr("正在读「{target}」…", "target" to s(a, "path").substringAfterLast('/'))
+            "write_file" -> tr("正在写「{target}」…", "target" to s(a, "path").substringAfterLast('/'))
+            "run_js" -> tr("正在运行代码…")
             "act" -> {
                 val actions = runCatching { a["actions"]!!.jsonArray.map { it.jsonObject } }.getOrDefault(emptyList())
                 val first = actions.firstOrNull() ?: JsonObject(emptyMap())
@@ -130,6 +200,10 @@ object Tools {
             else -> tr("正在操作手机…")
         }
     }
+
+    /** 进度里只显示网址的域名（完整网址太长） */
+    private fun host(url: String): String =
+        url.substringAfter("://").substringBefore('/').substringBefore('?').removePrefix("www.").ifBlank { url.take(40) }
 
     /** 看实时屏幕的工具：用过它们的问答不拿去后台对比 */
     fun looksAtScreen(name: String) = name in setOf("observe_screen", "find", "read", "zoom", "point", "act")

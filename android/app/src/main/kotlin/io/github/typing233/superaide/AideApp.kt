@@ -6,6 +6,8 @@ import io.github.typing233.superaide.assist.AssistantRoute
 import io.github.typing233.superaide.core.llm.Chats
 import io.github.typing233.superaide.data.SettingsStore
 import io.github.typing233.superaide.diag.Diag
+import io.github.typing233.superaide.run.Aide
+import io.github.typing233.superaide.run.TaskNotice
 import io.github.typing233.superaide.secure.SecretStore
 import io.github.typing233.superaide.update.Updater
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -14,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 
 class AideApp : Application() {
     /**
@@ -43,6 +46,14 @@ class AideApp : Application() {
         }
         // 被强行停止过（清理后台、划掉最近任务）：无障碍被系统去掉了，有权限就加回去
         runCatching { SelfHeal.ensure(this) }
+        // 任务进行中的通知（带停止按钮）：无障碍没开也要有
+        scope.launch { Aide.card.collect { c -> runCatching { TaskNotice.update(this@AideApp, c) } } }
+        // 对话的工作区（用户给的、生成的文件）：30 天没动过的清掉；上次没发出去的附件也清掉
+        scope.launch(Dispatchers.IO) {
+            val old = System.currentTimeMillis() - 30L * 24 * 3600 * 1000
+            File(filesDir, "work").listFiles()?.filter { d -> d.walkTopDown().all { it.lastModified() < old } }?.forEach { it.deleteRecursively() }
+            File(cacheDir, "attach").deleteRecursively()
+        }
         // 系统绑定默认助手服务要一点时间：过几秒再看它绑上没有；顺便每天查一次更新
         scope.launch {
             delay(8_000)

@@ -22,6 +22,14 @@ object EnvText {
         val zone: ZoneId = ZoneId.systemDefault(),
     )
 
+    /** 没有屏幕可读（在超级助手自己的对话页里问的、无障碍没开）：只给时间、手机和一句说明 */
+    fun bare(now: Long, x: Extras = Extras(), note: String): String = buildString {
+        appendLine("时间：" + time.format(Instant.ofEpochMilli(now).atZone(x.zone)))
+        if (x.device.isNotBlank()) appendLine("手机：${x.device}")
+        if (x.clipboard.isNotBlank()) appendLine("剪贴板：<clipboard>${Redact.apply(x.clipboard.take(500))}</clipboard>")
+        append(note)
+    }
+
     fun render(screen: Screen, x: Extras = Extras()): String {
         val out = StringBuilder()
         out.appendLine("时间：" + time.format(Instant.ofEpochMilli(screen.time).atZone(x.zone)))
