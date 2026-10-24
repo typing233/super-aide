@@ -48,6 +48,7 @@ from ..router import Decision, EngineRouter, Task, judge
 from ..router import report as route_report
 from ..router.judge import Verdict
 from ..router.policy import fg_category, task_kind
+from ..setup.configure import codex_offered
 from ..snapshot.collector import Context
 from ..snapshot.collector import Session as Snapshot
 from . import browser_use, computer, prompts
@@ -425,6 +426,11 @@ class EngineHub(QObject):
                     "efforts": [value(o.reasoning_effort) for o in m.supported_reasoning_efforts],
                     "default": value(m.default_reasoning_effort), "desc": m.description or "",
                     "upgrade": m.upgrade or ""} for m in listed})
+                # models() 报的是 Codex 自带的目录：接的是自定义服务商时，能用的是这个服务自己列出的那些
+                # （和测试连接列的一样），它列不出来才照 models() 的
+                offered = await asyncio.get_running_loop().run_in_executor(None, codex_offered)
+                if offered:
+                    found["codex"] = offered
             except Exception as e:  # noqa: BLE001
                 log.warning("获取 Codex 模型列表失败：%s", e)
                 errors.append(tr("{engine}：{error}", engine="Codex", error=friendly_error(e)))

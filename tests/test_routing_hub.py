@@ -183,7 +183,8 @@ def test_a_candidate_that_cannot_even_open_counts_against_it(monkeypatch):
     assert hub.router.calls == []
 
 
-def test_codex_model_metadata_reaches_the_router():
+def discover_codex(monkeypatch, offered: list[str]) -> tuple[list[dict], list[tuple]]:
+    """发现模型：Codex 的 models() 报一个 gpt-6-luna；它接的服务商自己列出的是 offered（官方服务、列不出来时是空的）。"""
     updates = []
     effort = lambda v: SimpleNamespace(reasoning_effort=SimpleNamespace(value=v))  # noqa: E731
     listed = [SimpleNamespace(id="gpt-6-luna", description="Fast and affordable model for easier tasks.",
@@ -195,6 +196,7 @@ def test_codex_model_metadata_reaches_the_router():
             return SimpleNamespace(data=listed)
         return SimpleNamespace(models=models)
 
+    monkeypatch.setattr(hub_module, "codex_offered", lambda: list(offered))  # 不读这台机器真实的 Codex 配置
     found = []
     cfg = SimpleNamespace(codex=SimpleNamespace(enabled=True), claude=SimpleNamespace(enabled=False),
                           dsh=SimpleNamespace(enabled=False))
@@ -202,9 +204,27 @@ def test_codex_model_metadata_reaches_the_router():
                    {"codex": SimpleNamespace(client=client)},
                    models_found=SimpleNamespace(emit=lambda result: found.append(result)))
     asyncio.run(EngineHub._discover_models(hub))
+    return found, updates
+
+
+LUNA_META = {"gpt-6-luna": {"efforts": ["low", "medium"], "default": "medium",
+                            "desc": "Fast and affordable model for easier tasks.", "upgrade": ""}}
+
+
+def test_codex_model_metadata_reaches_the_router(monkeypatch):
+    found, updates = discover_codex(monkeypatch, [])
     assert found[0]["found"] == {"codex": ["gpt-6-luna"]}
-    assert updates == [("codex", {"gpt-6-luna": {"efforts": ["low", "medium"], "default": "medium",
-                                                 "desc": "Fast and affordable model for easier tasks.", "upgrade": ""}})]
+    assert updates == [("codex", LUNA_META)]
+
+
+def test_codex_on_a_custom_provider_routes_what_that_service_lists(monkeypatch):
+    """Codex 的 models() 报的是它自带的目录，不管接的是哪个服务商：换成中转后测试连接说找到几十个模型，
+    可路由的模型里还是原来那几个。接了自定义服务商时，用这个服务自己列出的（和测试连接的一样）；
+    对得上名字的照样带着 Codex 给的思考强度。"""
+    found, updates = discover_codex(monkeypatch, ["relay-pro", "gpt-6-luna", "relay-mini"])
+    assert found[0]["found"] == {"codex": ["relay-pro", "gpt-6-luna", "relay-mini"]}
+    assert found[0]["errors"] == []
+    assert updates == [("codex", LUNA_META)]
 
 
 def test_reloading_codex_never_hands_out_the_process_being_closed(monkeypatch):
