@@ -129,13 +129,14 @@ def claude_env() -> dict[str, str]:
 
 
 def list_models(timeout: float = 15) -> list[str]:
-    """服务地址 /v1/models 返回的完整模型名（P0：你的服务地址返回 32 个）。阻塞调用，放在后台跑。"""
+    """服务地址 /v1/models 返回的完整模型名（P0：你的服务地址返回 32 个）。阻塞调用，放在后台跑。
+    和测试连接（configure.check_claude）列的是同一份：官方接口默认一页只给 20 个，要一次列全。"""
     import urllib.request
 
     env = claude_env()
     base = env.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
     token = env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY", "")
-    req = urllib.request.Request(f"{base}/v1/models", headers={
+    req = urllib.request.Request(f"{base}/v1/models?limit=1000", headers={
         "Authorization": f"Bearer {token}", "x-api-key": token, "anthropic-version": "2023-06-01"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode("utf-8"))

@@ -27,7 +27,7 @@ from pathlib import Path
 
 from ..i18n import tr
 from . import dshconf, winenv
-from .detect import NAMES, Places, Report, claude_dir, codex_dir, dsh_desktop, dsh_dir
+from .detect import NAMES, Places, Report, claude_dir, codex_dir, codex_provider, dsh_desktop, dsh_dir
 
 log = logging.getLogger(__name__)
 
@@ -136,7 +136,8 @@ def _open(req: urllib.request.Request, timeout: float):
         return urllib.request.urlopen(req, timeout=timeout)
 
 
-def _list(url: str, headers: dict[str, str], timeout: float) -> Check:
+def _list(url: str, headers: dict[str, str], timeout: float, keep=lambda model: True) -> Check:
+    """列模型。keep：只留（也只数）引擎用得上的那些，说"找到 N 个"要和可路由的模型对得上。"""
     req = urllib.request.Request(url, headers={**headers, "User-Agent": "super-aide-setup"})
     try:
         with _open(req, timeout) as resp:
@@ -154,20 +155,43 @@ def _list(url: str, headers: dict[str, str], timeout: float) -> Check:
         return Check(True, tr("连上了，但返回的不是模型列表，没法提前确认密钥"))
     items = data.get("data") if isinstance(data, dict) else None
     models = [str(m.get("id")) for m in items or [] if isinstance(m, dict) and m.get("id")]
+    models = [m for m in models if keep(m)]
     return Check(True, tr("连接成功，找到 {n} 个模型", n=len(models)) if models else tr("连接成功"), models, True)
 
 
 def check_claude(base: str, key: str, timeout: float = 15) -> Check:
+    """只留 claude- 开头的：可路由的模型也只要这些（claude.list_models）。"""
     root = claude_base(base) or CLAUDE_OFFICIAL
-    result = _list(f"{root}/v1/models?limit=1000", {
-        "x-api-key": key, "Authorization": f"Bearer {key}", "anthropic-version": "2023-06-01"}, timeout)
-    result.models = [m for m in result.models if m.startswith("claude-")]
-    return result
+    return _list(f"{root}/v1/models?limit=1000", {
+        "x-api-key": key, "Authorization": f"Bearer {key}", "anthropic-version": "2023-06-01"}, timeout,
+        keep=lambda model: model.startswith("claude-"))
 
 
 def check_openai(base: str, key: str, timeout: float = 15) -> Check:
     root = openai_base(base) or OPENAI_OFFICIAL
     return _list(f"{root}/models", {"Authorization": f"Bearer {key}"}, timeout)
+
+
+def codex_offered(places: Places | None = None, timeout: float = 15) -> list[str]:
+    """Codex 现在接的自定义服务商自己列出的模型（它的 /models，和"测试连接"列的是同一份）。阻塞调用，放在后台跑。
+    Codex 的 models() 报的是它自带的模型目录，不管接的是哪个服务商（2026-10-23：换成中转后测试连接说找到 43 个模型，
+    可路由的模型里还是 gpt-6-astra 那几个）。用的是官方服务、Codex 自带的本地服务商（ollama 这些），
+    或者这个服务列不出模型（不少中转不支持）、连不上时返回空：照 Codex 自己报的。"""
+    p = places or Places.current()
+    try:
+        cfg = tomllib.loads((codex_dir(p) / "config.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    info = (cfg.get("model_providers") or {}).get(codex_provider(cfg))
+    base = str(info.get("base_url") or "").strip().rstrip("/") if isinstance(info, dict) else ""
+    if not base.startswith(("http://", "https://")):
+        return []
+    # 和 Codex 一样拿密钥：写在服务商里的，或者 env_key 说的那个环境变量；都没有（比如本机部署的服务）就不带
+    key = str(info.get("experimental_bearer_token") or "") or p.env.get(str(info.get("env_key") or "").upper(), "")
+    result = _list(f"{base}/models", {"Authorization": f"Bearer {key}"} if key else {}, timeout)
+    if not result.verified:
+        log.info("Codex 的服务商没列出模型（%s），可路由的模型照 Codex 自己报的", result.message)
+    return result.models if result.verified else []
 
 
 def _read_stream(resp, deadline: float) -> tuple[int, str]:

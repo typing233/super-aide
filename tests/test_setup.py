@@ -345,10 +345,47 @@ def test_a_dropped_connection_is_retried_once(service, monkeypatch):
 def test_check_lists_models(service):
     result = configure.check("claude", service, "k")
     assert result.ok and result.verified and result.models == ["claude-opus-5-5"]
+    assert result.message == "连接成功，找到 1 个模型"  # 只数 Claude 用得上的：和可路由的模型对得上
     assert FakeService.seen[-1]["path"].startswith("/v1/models")
     result = configure.check("codex", service, "k")
     assert result.ok and result.models == ["claude-opus-5-5", "gpt-6-astra"]
+    assert result.message == "连接成功，找到 2 个模型"
     assert FakeService.seen[-1]["Authorization"] == "Bearer k"
+
+
+def test_codex_custom_provider_offers_what_that_service_lists(service, places, monkeypatch):
+    """Codex 的 models() 报的是它自带的目录，不管接的是哪个服务商：测试连接说找到几十个模型，可路由的模型里却还是
+    原来那几个。可路由的模型要问 Codex 现在接的这个服务自己，和测试连接列的是同一份。"""
+    monkeypatch.setattr(FakeService, "body", {"data": [{"id": "relay-pro"}, {"id": "relay-mini"}]})
+    write(places.home / ".codex" / "config.toml", 'model = "relay-pro"\nmodel_provider = "super_aide"\n\n'
+          f'[model_providers.super_aide]\nname = "Custom"\nbase_url = "{service}/v1"\n'
+          'experimental_bearer_token = "k1"\nwire_api = "responses"\n')
+    assert configure.codex_offered(places) == ["relay-pro", "relay-mini"]
+    assert FakeService.seen[-1]["path"] == "/v1/models" and FakeService.seen[-1]["Authorization"] == "Bearer k1"
+    # 自己在 config.toml 里配的服务商（选在 profile 里），密钥在 env_key 说的环境变量里
+    write(places.home / ".codex" / "config.toml", 'profile = "work"\n\n[profiles.work]\nmodel_provider = "relay"\n\n'
+          f'[model_providers.relay]\nbase_url = "{service}/v1/"\nenv_key = "RELAY_KEY"\n')
+    assert configure.codex_offered(with_env(places, RELAY_KEY="k2")) == ["relay-pro", "relay-mini"]
+    assert FakeService.seen[-1]["path"] == "/v1/models" and FakeService.seen[-1]["Authorization"] == "Bearer k2"
+
+
+def test_codex_keeps_its_own_list_on_the_official_service_or_when_the_service_cannot_list(service, places):
+    """官方服务（账号登录、API Key）、Codex 自带的本地服务商用 Codex 自己的目录，不去问谁；
+    服务列不出模型（不少中转不支持 /models）、密钥不对、没配过 Codex 时也照 Codex 自己报的。"""
+    assert configure.codex_offered(places) == []
+    write(places.home / ".codex" / "config.toml", 'model = "gpt-6-astra"\n')
+    assert configure.codex_offered(places) == []
+    write(places.home / ".codex" / "config.toml", 'model_provider = "ollama"\n')
+    assert configure.codex_offered(places) == [] and FakeService.seen == []
+    write(places.home / ".codex" / "config.toml", 'model_provider = "relay"\n\n[model_providers.relay]\n'
+          'base_url = "relay.example.com/v1"\n')
+    assert configure.codex_offered(places) == [] and FakeService.seen == []  # 地址不全：不出错，照 Codex 的
+    write(places.home / ".codex" / "config.toml", 'model_provider = "relay"\n\n[model_providers.relay]\n'
+          f'base_url = "{service}/v1"\nexperimental_bearer_token = "k"\n')
+    FakeService.status = 404
+    assert configure.codex_offered(places) == []
+    FakeService.status = 401
+    assert configure.codex_offered(places) == []
 
 
 def test_check_reports_bad_key_and_unlisted_service(service):
